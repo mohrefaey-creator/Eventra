@@ -3,7 +3,7 @@ import { EventEmitter, once } from 'node:events';
 import { request } from 'node:http';
 import { after, describe, it } from 'node:test';
 import { WebSocket } from 'ws';
-import { startServer } from '../server/index.js';
+import { normalizeFingerprint, startServer } from '../server/index.js';
 import { createSignaling } from '../server/signaling.js';
 
 // ---------------------------------------------------------------- unit: logic
@@ -345,5 +345,59 @@ describe('server', async () => {
 
     host.close();
     peer.close();
+  });
+});
+
+// ------------------------------------------------------- native app support
+
+describe('native app support', async () => {
+  const fp = 'A1:B2:C3:D4:E5:F6:07:18:29:3A:4B:5C:6D:7E:8F:90:A1:B2:C3:D4:E5:F6:07:18:29:3A:4B:5C:6D:7E:8F:90';
+
+  it('normalizes SHA-256 fingerprints and rejects anything else', () => {
+    assert.equal(normalizeFingerprint(fp), fp);
+    assert.equal(normalizeFingerprint(fp.toLowerCase()), fp);
+    assert.equal(normalizeFingerprint(fp.replaceAll(':', '')), fp);
+    assert.equal(normalizeFingerprint('AB:CD'), null);
+    assert.equal(normalizeFingerprint(''), null);
+    assert.equal(normalizeFingerprint(undefined), null);
+  });
+
+  it('serves nothing at assetlinks.json until a certificate is configured', async () => {
+    const server = await startServer({ port: 0, tls: false, quiet: true, host: '127.0.0.1' });
+    try {
+      const res = await fetch(`http://127.0.0.1:${server.httpPort}/.well-known/assetlinks.json`);
+      assert.equal(res.status, 404);
+      const info = await (await fetch(`http://127.0.0.1:${server.httpPort}/api/info`)).json();
+      assert.deepEqual(info.appLinks, { android: '', ios: '' });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it('publishes Android App Links and download links when configured', async () => {
+    const server = await startServer({
+      port: 0,
+      tls: false,
+      quiet: true,
+      host: '127.0.0.1',
+      androidPackage: 'com.example.mirror',
+      androidCertSha256: [fp.toLowerCase(), 'not-a-fingerprint'],
+      appLinks: { android: 'https://example.test/app.apk', ios: 'https://apps.apple.com/app/id1' },
+    });
+    try {
+      const res = await fetch(`http://127.0.0.1:${server.httpPort}/.well-known/assetlinks.json`);
+      assert.equal(res.status, 200);
+      assert.match(res.headers.get('content-type'), /application\/json/);
+      assert.deepEqual(await res.json(), [
+        {
+          relation: ['delegate_permission/common.handle_all_urls'],
+          target: { namespace: 'android_app', package_name: 'com.example.mirror', sha256_cert_fingerprints: [fp] },
+        },
+      ]);
+      const info = await (await fetch(`http://127.0.0.1:${server.httpPort}/api/info`)).json();
+      assert.deepEqual(info.appLinks, { android: 'https://example.test/app.apk', ios: 'https://apps.apple.com/app/id1' });
+    } finally {
+      await server.close();
+    }
   });
 });

@@ -47,6 +47,12 @@ export function lanAddresses() {
   return out.sort((a, b) => Number(PRIVATE_V4.test(b)) - Number(PRIVATE_V4.test(a)));
 }
 
+/** "ab:cd:…" or a bare 64-hex string -> "AB:CD:…", or null if it is not a SHA-256 fingerprint. */
+export function normalizeFingerprint(raw) {
+  const hex = String(raw ?? '').replace(/[^0-9a-fA-F]/g, '').toUpperCase();
+  return hex.length === 64 ? hex.match(/../g).join(':') : null;
+}
+
 const isLoopbackHost = (host) => /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(host ?? '');
 
 /**
@@ -62,9 +68,18 @@ export async function startServer(options = {}) {
     publicUrl = '',
     iceServers = [{ urls: 'stun:stun.l.google.com:19302' }],
     trustProxy = false,
+    // Native sender apps: where to get them, and which Android signing certificates may claim
+    // https://<this server>/send links (Android App Links), so a scanned QR opens the app directly.
+    appLinks = {},
+    androidPackage = 'app.mirrorlink',
+    androidCertSha256 = [],
     signaling: signalingOptions,
     quiet = false,
   } = options;
+  const certFingerprints = androidCertSha256.map(normalizeFingerprint).filter(Boolean);
+  if (!quiet && certFingerprints.length !== androidCertSha256.length) {
+    console.warn('ANDROID_CERT_SHA256: ignoring entries that are not SHA-256 fingerprints (64 hex digits).');
+  }
 
   const lan = lanAddresses();
   const signaling = createSignaling(signalingOptions);
@@ -91,7 +106,31 @@ export async function startServer(options = {}) {
     if (url.pathname === '/api/info') {
       const origins = senderOrigins(req);
       res.writeHead(200, { 'Content-Type': MIME['.json'], 'Cache-Control': 'no-store' });
-      res.end(JSON.stringify({ iceServers, senderOrigins: origins, secureSenderAvailable: origins.some((o) => o.startsWith('https:')) }));
+      res.end(
+        JSON.stringify({
+          iceServers,
+          senderOrigins: origins,
+          secureSenderAvailable: origins.some((o) => o.startsWith('https:')),
+          appLinks: { android: appLinks.android || '', ios: appLinks.ios || '' },
+        }),
+      );
+      return;
+    }
+
+    if (url.pathname === '/.well-known/assetlinks.json') {
+      if (certFingerprints.length === 0) {
+        res.writeHead(404, { 'Content-Type': 'text/plain' }).end('Not configured');
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': MIME['.json'], 'Cache-Control': 'public, max-age=300' });
+      res.end(
+        JSON.stringify([
+          {
+            relation: ['delegate_permission/common.handle_all_urls'],
+            target: { namespace: 'android_app', package_name: androidPackage, sha256_cert_fingerprints: certFingerprints },
+          },
+        ]),
+      );
       return;
     }
 
@@ -251,6 +290,9 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     tls: env.TLS !== 'off',
     publicUrl: env.PUBLIC_URL || '',
     trustProxy: env.TRUST_PROXY === '1',
+    appLinks: { android: env.ANDROID_APP_URL || '', ios: env.IOS_APP_URL || '' },
+    androidPackage: env.ANDROID_PACKAGE || 'app.mirrorlink',
+    androidCertSha256: (env.ANDROID_CERT_SHA256 || '').split(',').filter((v) => v.trim()),
     ...(iceServers && { iceServers }),
   }).catch((err) => {
     console.error(err.code === 'EADDRINUSE' ? `Port already in use: ${err.message}` : err);

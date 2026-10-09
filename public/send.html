@@ -13,7 +13,13 @@
     <h1>Share this device's screen</h1>
     <p class="lead">Enter the code shown on the receiving screen.</p>
 
-    <div id="unsupported" class="notice" hidden></div>
+    <div id="unsupported" class="notice" hidden>
+      <p id="unsupported-text"></p>
+      <p id="app-actions" class="actions" hidden>
+        <a id="open-app" class="btn primary" href="#">Open in the MirrorLink app</a>
+        <a id="get-app" class="btn" href="#" hidden>Get the app</a>
+      </p>
+    </div>
 
     <form class="panel" id="form" autocomplete="off" novalidate>
       <div class="field">

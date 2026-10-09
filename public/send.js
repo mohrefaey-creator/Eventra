@@ -11,6 +11,10 @@ const els = {
   stop: $('stop'),
   status: $('status'),
   unsupported: $('unsupported'),
+  unsupportedText: $('unsupported-text'),
+  appActions: $('app-actions'),
+  openApp: $('open-app'),
+  getApp: $('get-app'),
 };
 
 // bitrate caps are per-stream; "saver" also halves the pixel count's worth of data
@@ -34,21 +38,51 @@ const setStatus = (text, kind = '') => {
 
 // --------------------------------------------------------------- capability
 
+const isAndroid = /Android/i.test(navigator.userAgent);
+// iPadOS Safari reports itself as a Mac, so look for touch as well.
+const isApple = /iPhone|iPad|iPod/i.test(navigator.userAgent) || (/Macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+
 function explainUnsupported() {
-  let text = null;
   if (!window.isSecureContext) {
-    text =
+    showNotice(
       'This page was opened over plain HTTP, so the browser blocks screen capture. ' +
-      'Open the https:// address instead and accept the certificate warning once.';
+        'Open the https:// address instead and accept the certificate warning once.',
+    );
   } else if (!navigator.mediaDevices?.getDisplayMedia) {
-    text =
-      "This browser can't capture its own screen. iPhone/iPad Safari and most mobile browsers don't allow it from a web page. " +
-      'Use a desktop browser, the system screen-mirroring feature (AirPlay / Cast), or a native MirrorLink sender app.';
+    const mobile = isAndroid || isApple;
+    showNotice(
+      mobile
+        ? "This browser can't capture its own screen, which is normal for phones and tablets. Use the MirrorLink app instead."
+        : "This browser can't capture its own screen. Try a current desktop browser such as Chrome, Edge, Firefox or Safari on a computer.",
+    );
+    if (mobile) offerApp();
   }
-  if (text) {
-    els.unsupported.textContent = text;
-    els.unsupported.hidden = false;
-    els.start.disabled = true;
+}
+
+function showNotice(text) {
+  els.unsupportedText.textContent = text;
+  els.unsupported.hidden = false;
+  els.start.disabled = true;
+}
+
+/** Buttons that hand this pairing over to the native app (and where to get it). */
+async function offerApp() {
+  els.appActions.hidden = false;
+  const link = () => {
+    const code = els.code.value.replace(/\D/g, '');
+    return `mirrorlink://join?server=${encodeURIComponent(location.origin)}` + (code ? `&code=${code}` : '');
+  };
+  els.openApp.href = link();
+  els.code.addEventListener('input', () => (els.openApp.href = link()));
+  try {
+    const { appLinks } = await loadInfo();
+    const url = (isApple && appLinks.ios) || (isAndroid && appLinks.android) || appLinks.android || appLinks.ios;
+    if (url) {
+      els.getApp.href = url;
+      els.getApp.hidden = false;
+    }
+  } catch {
+    // no download link is not fatal: "Open in the app" still works for people who have it
   }
 }
 

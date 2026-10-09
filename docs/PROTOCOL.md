@@ -95,6 +95,20 @@ Receiver                    Server                      Sender
    │◀═══════════════ WebRTC video (direct) ════════════════│
 ```
 
+## Links a sender app should understand
+
+The receiver's QR code and the web sender page produce these; parse both (see `PairingLinks` in `android/core`):
+
+```
+https://<server>/send?code=123456                          the receiver's QR code
+mirrorlink://join?server=https%3A%2F%2F<server>&code=123456  "open in the app" from the web sender page
+```
+
+`code` is optional in the second form (the user types it). Fill the form from the link, but let the user tap
+Start: never begin sharing from a link alone. An app that wants scanned QR codes to open it directly registers
+Android App Links / iOS Universal Links for `https://<server>/send`; the server publishes
+`/.well-known/assetlinks.json` when `ANDROID_CERT_SHA256` is set.
+
 ## Native sender checklist
 
 - iOS: a Broadcast Upload Extension receives `CMSampleBuffer`s in a separate process; hand frames to the

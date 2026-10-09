@@ -8,6 +8,7 @@ import okhttp3.WebSocketListener
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.RejectedExecutionException
+import java.util.concurrent.TimeUnit
 
 /**
  * Pairs with a MirrorLink receiver and walks the sender through the protocol in docs/PROTOCOL.md:
@@ -22,7 +23,8 @@ class SenderSession(
     private val deviceName: String,
     private val peer: Peer,
     private val listener: Listener,
-    private val client: OkHttpClient = OkHttpClient(),
+    // The ping notices a dead connection (Wi-Fi dropped, phone asleep) within about 40 seconds.
+    private val client: OkHttpClient = OkHttpClient.Builder().pingInterval(20, TimeUnit.SECONDS).build(),
 ) {
     enum class State { IDLE, CONNECTING, WAITING_APPROVAL, NEGOTIATING, LIVE, ENDED }
 
@@ -58,6 +60,10 @@ class SenderSession(
     private var socket: WebSocket? = null
     private var socketOpen = false
     private var iceServers: List<IceServer> = emptyList()
+
+    // The receiver can only add a candidate after it has the offer, so hold early ones back.
+    private var offerSent = false
+    private val earlyCandidates = mutableListOf<IceCandidate>()
 
     fun start() {
         post {
@@ -160,11 +166,16 @@ class SenderSession(
 
     private val peerListener = object : Peer.Listener {
         override fun onLocalDescription(description: SessionDescription) = post {
-            if (negotiating()) socket?.send(Protocol.description(description))
+            if (!negotiating()) return@post
+            socket?.send(Protocol.description(description))
+            offerSent = true
+            earlyCandidates.forEach { socket?.send(Protocol.candidate(it)) }
+            earlyCandidates.clear()
         }
 
         override fun onLocalCandidate(candidate: IceCandidate) = post {
-            if (negotiating()) socket?.send(Protocol.candidate(candidate))
+            if (!negotiating()) return@post
+            if (offerSent) socket?.send(Protocol.candidate(candidate)) else earlyCandidates += candidate
         }
 
         override fun onConnected() = post {

@@ -19,7 +19,13 @@ function findChromium() {
   return undefined; // let Playwright look in its default cache
 }
 
-const server = await startServer({ port: 0, httpsPort: 0, quiet: true, host: '127.0.0.1' });
+const server = await startServer({
+  port: 0,
+  httpsPort: 0,
+  quiet: true,
+  host: '127.0.0.1',
+  appLinks: { android: 'https://example.test/mirrorlink.apk' },
+});
 const browser = await chromium.launch({
   executablePath: findChromium(),
   args: ['--disable-features=WebRtcHideLocalIpsWithMdns', '--autoplay-policy=no-user-gesture-required'],
@@ -134,6 +140,28 @@ try {
   assert.match(await bare.textContent('#unsupported'), /can't capture its own screen/);
   assert.equal(await bare.isDisabled('#start'), true);
   console.log('ok  unsupported browsers get an explanation');
+
+  // --- a phone browser is handed over to the native app, with the pairing carried along
+  const phone = await browser.newContext({
+    ignoreHTTPSErrors: true,
+    userAgent: 'Mozilla/5.0 (Linux; Android 14; SM-X710) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36',
+    hasTouch: true,
+    isMobile: true,
+    viewport: { width: 412, height: 900 },
+  });
+  const phonePage = await phone.newPage();
+  await phonePage.addInitScript(() => delete MediaDevices.prototype.getDisplayMedia);
+  await phonePage.goto(`https://127.0.0.1:${server.httpsPort}/send?code=${code}`);
+  assert.match(await phonePage.textContent('#unsupported-text'), /Use the MirrorLink app/);
+  await phonePage.waitForSelector('#get-app:not([hidden])');
+  assert.equal(await phonePage.getAttribute('#get-app', 'href'), 'https://example.test/mirrorlink.apk');
+  const deepLink = new URL(await phonePage.getAttribute('#open-app', 'href'));
+  assert.equal(deepLink.protocol, 'mirrorlink:');
+  assert.equal(deepLink.searchParams.get('server'), `https://127.0.0.1:${server.httpsPort}`);
+  assert.equal(deepLink.searchParams.get('code'), code);
+  await phonePage.fill('#code', '654321'); // typing a new code updates the link
+  assert.equal(new URL(await phonePage.getAttribute('#open-app', 'href')).searchParams.get('code'), '654321');
+  console.log('ok  phones are offered the app, with server and code in the deep link');
 } catch (err) {
   failed = true;
   console.error('\nE2E FAILED:', err);

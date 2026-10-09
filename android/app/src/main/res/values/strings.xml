@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MirrorLink</string>
+    <string name="title">Share your screen</string>
+    <string name="lead">Enter the code shown on the receiving screen, then tap Start.</string>
+
+    <string name="label_server">Server</string>
+    <string name="action_change_server">Change</string>
+    <string name="hint_server">mirror.example.com</string>
+    <string name="label_code">Pairing code</string>
+    <string name="hint_code">000 000</string>
+    <string name="label_name">This device\'s name</string>
+    <string name="label_quality">Quality</string>
+    <string name="quality_balanced">Balanced</string>
+    <string name="quality_sharp">Sharp text (more bandwidth)</string>
+    <string name="quality_saver">Smooth, low bandwidth</string>
+
+    <string name="action_start">Start mirroring</string>
+    <string name="action_stop">Stop</string>
+
+    <string name="status_idle">Ready.</string>
+    <string name="status_connecting">Connecting…</string>
+    <string name="status_waiting">Waiting for the receiving screen to approve…</string>
+    <string name="status_negotiating">Approved. Connecting…</string>
+    <string name="status_live">Mirroring. Your screen is visible on the receiver.</string>
+
+    <string name="end_stopped">Stopped sharing.</string>
+    <string name="end_declined">The receiving screen declined.</string>
+    <string name="end_timed_out">Nobody approved the request in time.</string>
+    <string name="end_by_receiver">The receiving screen ended the session.</string>
+    <string name="end_receiver_left">The receiving screen went away.</string>
+    <string name="end_bad_code">That code isn\'t valid, or it has expired. Check the number on the receiving screen.</string>
+    <string name="end_busy">That screen is already receiving from another device.</string>
+    <string name="end_rate_limited">Too many wrong codes. Wait a minute and try again.</string>
+    <string name="end_unreachable">Cannot reach the MirrorLink server. Check the address and your connection.</string>
+    <string name="end_lost">Lost connection to the server.</string>
+    <string name="end_failed">Could not open a direct connection. Are both devices on the same network?</string>
+    <string name="end_error">Something went wrong. Try again.</string>
+
+    <string name="error_code">Enter the 6-digit code shown on the receiving screen.</string>
+    <string name="error_server">Enter the server address, for example mirror.example.com.</string>
+    <string name="error_capture_denied">Screen sharing was cancelled.</string>
+
+    <string name="notification_channel">Screen mirroring</string>
+    <string name="notification_title">Mirroring your screen</string>
+    <string name="notification_text">Your screen is visible on the receiving display.</string>
+    <string name="notification_stop">Stop</string>
+</resources>

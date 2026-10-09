@@ -36,14 +36,9 @@ Both devices need a network path to each other: the same Wi-Fi, or the internet 
 | **Bluetooth** | **Not used, and it can't be.** Bluetooth bandwidth is far too low for live screen video, and browsers can't act as a Bluetooth peripheral or use it as a media transport (Web Bluetooth is Chromium-only, absent on iOS Safari, and is a central/GATT client only). MirrorLink uses Wi-Fi/IP instead. |
 | **Receiver** (shows the mirror) | Any modern browser: laptop, desktop, smart-TV browser, tablet. |
 | **Sender: desktop browsers** | Chrome, Edge, Firefox, Safari on Mac/Windows/Linux. Works today. |
-| **Sender: iPhone / iPad / Android browsers** | **Not possible from a web page.** `getDisplayMedia` is unavailable in iOS Safari and Chrome for Android, so a website cannot capture a phone's or tablet's screen. The sender page detects this and says so. |
-
-To mirror a phone or tablet you need one of:
-
-- **The system feature**: AirPlay (iPhone/iPad), Cast / Smart View (Android). No code from this project.
-- **A thin native sender app** that speaks the protocol in [`docs/PROTOCOL.md`](docs/PROTOCOL.md): an iOS
-  ReplayKit *Broadcast Upload Extension* or Android `MediaProjection` capturing the screen, feeding a
-  native WebRTC stack. The receiver, pairing and approval flow in this repo work unchanged with it.
+| **Sender: Android phones and tablets** | **The Android app in [`android/`](android/README.md)** (Samsung, Honor, any Android 8+). A web page cannot capture a phone's screen, so the app does it and uses the same pairing and receiver. On a phone, the sender page offers an **Open in the MirrorLink app** button. |
+| **Sender: iPhone / iPad** | **Not built yet.** It needs a native app too (an iOS ReplayKit Broadcast Upload Extension) and cannot be built or tested on Linux. [`docs/PROTOCOL.md`](docs/PROTOCOL.md) is the spec it will follow. Until then use the built-in AirPlay. |
+| **Sender: phone/tablet browsers** | Not possible: `getDisplayMedia` is unavailable in iOS Safari and Chrome for Android. The sender page detects this and points to the app. |
 
 ## Configuration (environment variables)
 
@@ -56,6 +51,9 @@ To mirror a phone or tablet you need one of:
 | `PUBLIC_URL` | – | Public HTTPS origin senders should use, e.g. `https://mirror.example.com` |
 | `ICE_SERVERS` | Google STUN | JSON array of STUN/TURN servers. Add a **TURN** server for devices on different networks / strict firewalls |
 | `TRUST_PROXY` | off | `1` to use `X-Forwarded-For` for rate limiting (only behind a proxy you control) |
+| `ANDROID_APP_URL` / `IOS_APP_URL` | – | Where to get the sender app; the sender page shows a **Get the app** link on phones |
+| `ANDROID_CERT_SHA256` | – | SHA-256 fingerprint(s) of the Android app's signing key (comma-separated). Publishes `/.well-known/assetlinks.json` so a scanned QR opens the app directly |
+| `ANDROID_PACKAGE` | `app.mirrorlink` | Android package name used in `assetlinks.json` |
 
 **Why HTTPS?** Browsers only allow screen capture on secure origins. `http://localhost` counts, but
 `http://192.168.x.x` does not, so senders on the LAN must use the HTTPS port. The certificate is cached in `.certs/`
@@ -87,8 +85,9 @@ open (for example Vercel functions) are not suitable for this server.
 ## Development
 
 ```bash
-npm test            # 24 unit + integration tests (pairing logic, server, security checks)
+npm test            # 27 unit + integration tests (pairing logic, server, security checks, app links)
 npm run test:e2e    # real browsers: pairing + WebRTC video through the real server (needs Chromium)
+cd android && ./gradlew -PcoreOnly :core:test   # 24 tests for the Android pairing core, incl. against the real server
 ```
 
 `test:e2e` uses `$CHROMIUM_PATH`, or a Chromium under `$PLAYWRIGHT_BROWSERS_PATH`, or Playwright's default install.
@@ -98,6 +97,7 @@ Only screen *capture* is faked (a canvas stream); signaling, approval, WebRTC an
 server/index.js      HTTP + HTTPS + static files + /ws upgrade
 server/signaling.js  pairing codes, approval, signal relay (no I/O: unit-testable)
 server/tls.js        self-signed certificate cache
+android/             Android sender app (see android/README.md)
 public/              receiver, sender and landing pages (plain ES modules, no build step)
 docs/PROTOCOL.md     wire protocol for writing a native sender
 test/                node:test suite + Playwright e2e

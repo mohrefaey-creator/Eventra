@@ -48,7 +48,8 @@ object PairingLinks {
         val scheme = uri.scheme?.lowercase()
         if (scheme != "https" && scheme != "http") return null
         val host = uri.host?.takeIf { it.isNotEmpty() } ?: return null
-        val hostPart = if (':' in host) "[$host]" else host // IPv6 literal
+        // java.net.URI already returns IPv6 literals with their brackets; keep them as they are.
+        val hostPart = if (':' in host && !host.startsWith("[")) "[$host]" else host
         val port = if (uri.port != -1) ":${uri.port}" else ""
         return "$scheme://$hostPart$port"
     }
