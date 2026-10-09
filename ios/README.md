@@ -46,7 +46,24 @@ The .ipa is unsigned on purpose: you sign it yourself in step 2, so nothing secr
 A build takes about five minutes. The .ipa is about 6 MB, most of it the WebRTC library, which the build checks
 is really inside the app (the broadcast extension cannot start without it).
 
-### 2a. Install from a Windows laptop (Sideloadly)
+### 2a. Install from a Windows laptop (Sideloadly): the app opens, but the broadcast part does not run
+
+Tested on an iPhone 13 (iOS 26.2) with Sideloadly 0.70.1 and a free Apple ID: the app installs and opens, but iOS never
+starts the broadcast extension, so mirroring cannot begin. What the installed copy reported about itself:
+
+- the extension has no `embedded.mobileprovision` (its folder holds only `Info.plist`, the program and `_CodeSignature`);
+- it was signed with the **main app's** identity (`application-identifier` of the app, not of the extension);
+- Sideloadly's counter showed 9 of 10 App IDs left, i.e. only the app was registered, not the extension;
+- a test copy of the extension without the WebRTC library (`MirrorLink-TEST.ipa`, built by the same workflow) was
+  equally silent, so it is the signing, not the video library or the entitlements.
+
+An app extension needs its own App ID and provisioning profile. Use an installer that creates those for extensions
+(AltStore / AltServer on Windows, SideStore, or Xcode on a Mac), or a paid developer account with any installer.
+The debug lines the app sends (`install: …` in `/api/diag`, see `Shared/AppIdentity.swift` and
+`Shared/SignatureReader.swift`) show how a given installer signed the copy.
+
+Steps with Sideloadly (the app part works):
+
 
 1. Install **iTunes** and **iCloud** from apple.com (the Microsoft Store versions do not work), and
    **Sideloadly** from sideloadly.io.
