@@ -1,6 +1,14 @@
 // Receiver: hosts a pairing code, approves one sender, and plays their screen.
 import { $, connectSignal, loadInfo } from './signal.js';
 
+// A TV is read from across the room and driven by a remote: the same page, bigger.
+const looksLikeTv = /SMART-?TV|Android ?TV|GoogleTV|HbbTV|Tizen|Web0S|WebOS|NetCast|BRAVIA|Roku|VIDAA|Hisense|Haier|CrKey|AFTT|TV Safari/i.test(
+  navigator.userAgent,
+);
+if (looksLikeTv || location.pathname === '/tv' || /[?&]tv(=|&|$)/.test(location.search)) {
+  document.documentElement.className += ' tv';
+}
+
 const els = {
   pairing: $('pairing'),
   stage: $('stage'),
@@ -73,10 +81,10 @@ function setupOrigins() {
 
 async function start() {
   try {
-    info ??= await loadInfo();
+    if (!info) info = await loadInfo();
     if (!els.origin.options.length) setupOrigins();
     sig = await connectSignal();
-  } catch {
+  } catch (err) {
     setStatus('Cannot reach the MirrorLink server. Retrying…', 'error');
     scheduleReconnect();
     return;
@@ -92,7 +100,7 @@ async function start() {
     .on('code-expired', () => sig.send({ type: 'host' }))
     .on('join-request', onJoinRequest)
     .on('peer-left', (msg) => {
-      if (pendingPeer?.id === msg.peerId) closeDialog();
+      if (pendingPeer && pendingPeer.id === msg.peerId) closeDialog();
       if (pc) endSession('The device disconnected.');
     })
     .on('signal', (msg) => {
@@ -111,24 +119,39 @@ async function start() {
 
 function scheduleReconnect() {
   setTimeout(start, reconnectDelay);
-  reconnectDelay = Math.min(reconnectDelay * 2, 10_000);
+  reconnectDelay = Math.min(reconnectDelay * 2, 10000);
 }
 
 // --------------------------------------------------------------- approval UI
 
-function onJoinRequest({ peerId, name }) {
-  pendingPeer = { id: peerId, name };
-  els.requester.textContent = name;
+// Some TV browsers have no <dialog>; then the same box is shown as a plain overlay and the buttons are
+// handled by hand, so the request can still be approved with the remote.
+const hasDialog = typeof els.request.showModal === 'function';
+
+function onJoinRequest(request) {
+  pendingPeer = { id: request.peerId, name: request.name };
+  els.requester.textContent = request.name;
   els.request.returnValue = '';
-  els.request.showModal();
+  if (hasDialog) {
+    els.request.showModal();
+  } else {
+    els.request.setAttribute('open', '');
+    els.request.className = 'fallback';
+  }
+  const allow = els.request.querySelector('button[value="allow"]');
+  if (allow) allow.focus();
 }
 
 function closeDialog() {
   pendingPeer = null;
-  if (els.request.open) els.request.close('');
+  if (hasDialog) {
+    if (els.request.open) els.request.close('');
+  } else {
+    els.request.removeAttribute('open');
+  }
 }
 
-els.request.addEventListener('close', () => {
+function answerRequest() {
   const peer = pendingPeer;
   if (!peer) return; // closed programmatically (sender left)
   pendingPeer = null;
@@ -138,7 +161,20 @@ els.request.addEventListener('close', () => {
   } else {
     sig.send({ type: 'reject', peerId: peer.id });
   }
-});
+}
+
+els.request.addEventListener('close', answerRequest);
+
+if (!hasDialog) {
+  Array.prototype.forEach.call(els.request.querySelectorAll('button'), (button) => {
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      els.request.returnValue = button.value;
+      els.request.removeAttribute('open');
+      answerRequest();
+    });
+  });
+}
 
 // -------------------------------------------------------------------- WebRTC
 
@@ -154,7 +190,7 @@ function startPeer(peer) {
     if (e.candidate) sig.send({ type: 'signal', data: { candidate: e.candidate } });
   };
   pc.ontrack = (e) => {
-    els.video.srcObject = e.streams[0] ?? new MediaStream([e.track]);
+    els.video.srcObject = e.streams[0] || new MediaStream([e.track]);
     // Browsers will not start a video that is hidden, so put the stage on screen first and play explicitly.
     revealStage();
     showOverlay('Waiting for the first picture…');
@@ -195,11 +231,11 @@ function watchFirstPicture(mine, name) {
     try {
       for (const s of (await mine.getStats()).values()) {
         if (s.type === 'inbound-rtp' && s.kind === 'video') {
-          bytes = s.bytesReceived ?? 0;
-          decoded = s.framesDecoded ?? 0;
+          bytes = s.bytesReceived || 0;
+          decoded = s.framesDecoded || 0;
         }
       }
-    } catch {
+    } catch (err) {
       return;
     }
     if (mine.connectionState !== 'connected') {
@@ -252,7 +288,7 @@ function showPairing() {
   els.stage.hidden = true;
   els.pairing.hidden = false;
   document.title = 'Receive - MirrorLink';
-  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  if (fullscreenElement()) toggleFullscreen();
 }
 
 function teardownPeer() {
@@ -270,7 +306,7 @@ function teardownPeer() {
   els.stats.textContent = '';
   els.overlay.hidden = true;
   signalChain = Promise.resolve();
-  wakeLock?.release().catch(() => {});
+  if (wakeLock) wakeLock.release().catch(() => {});
   wakeLock = null;
 }
 
@@ -308,11 +344,21 @@ els.mute.addEventListener('click', () => {
   els.mute.setAttribute('aria-pressed', String(els.video.muted));
 });
 
-async function toggleFullscreen() {
+// Older TV and tablet browsers only know the prefixed names.
+const fullscreenElement = () => document.fullscreenElement || document.webkitFullscreenElement || null;
+const canFullscreen = Boolean(els.stage.requestFullscreen || els.stage.webkitRequestFullscreen);
+if (!canFullscreen) els.fullscreen.hidden = true;
+
+function toggleFullscreen() {
   try {
-    if (document.fullscreenElement) await document.exitFullscreen();
-    else await els.stage.requestFullscreen();
-  } catch {
+    if (fullscreenElement()) {
+      const exit = document.exitFullscreen || document.webkitExitFullscreen;
+      if (exit) exit.call(document);
+    } else {
+      const enter = els.stage.requestFullscreen || els.stage.webkitRequestFullscreen;
+      if (enter) enter.call(els.stage);
+    }
+  } catch (err) {
     // fullscreen can be refused (e.g. embedded); the stage already fills the window
   }
 }
@@ -322,8 +368,8 @@ els.video.addEventListener('dblclick', toggleFullscreen);
 async function requestWakeLock() {
   if (wakeLock) return;
   try {
-    wakeLock = await navigator.wakeLock?.request('screen');
-  } catch {
+    wakeLock = navigator.wakeLock ? await navigator.wakeLock.request('screen') : null;
+  } catch (err) {
     wakeLock = null;
   }
 }
@@ -354,7 +400,9 @@ function startStats() {
 
 // ------------------------------------------------------------------ controls
 
-els.newCode.addEventListener('click', () => sig?.send({ type: 'refresh' }));
+els.newCode.addEventListener('click', () => {
+  if (sig) sig.send({ type: 'refresh' });
+});
 els.origin.addEventListener('change', renderPairing);
 
 start();

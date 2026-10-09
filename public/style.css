@@ -33,11 +33,12 @@ html, body { margin: 0; min-height: 100%; }
 body { background: var(--bg); color: var(--text); line-height: 1.5; -webkit-text-size-adjust: 100%; }
 [hidden] { display: none !important; }
 
-.page { width: min(100% - 32px, 880px); margin: 0 auto; padding: 32px 0 48px; }
+.page { width: 92%; max-width: 880px; margin: 0 auto; padding: 32px 0 48px; }
+@supports (width: min(10px, 5px)) { .page { width: min(100% - 32px, 880px); } }
 header.brand { display: flex; align-items: center; gap: 10px; margin-bottom: 28px; font-weight: 700; letter-spacing: .2px; }
 header.brand a { color: inherit; text-decoration: none; display: flex; align-items: center; gap: 10px; }
 header.brand svg { width: 28px; height: 28px; color: var(--accent); }
-h1 { font-size: clamp(1.5rem, 4vw, 2.1rem); line-height: 1.2; margin: 0 0 8px; }
+h1 { font-size: 2rem; font-size: clamp(1.5rem, 4vw, 2.1rem); line-height: 1.2; margin: 0 0 8px; }
 h2 { font-size: 1.1rem; margin: 0 0 6px; }
 p { margin: 0 0 12px; }
 .lead { color: var(--muted); font-size: 1.05rem; margin-bottom: 24px; }
@@ -85,7 +86,7 @@ input[type=text], input[type=search], select {
 .code-input { font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; font-size: 2rem !important; letter-spacing: .35em; text-align: center; }
 .big-code {
   font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; font-variant-numeric: tabular-nums;
-  font-size: clamp(2.6rem, 9vw, 4.4rem); font-weight: 700; letter-spacing: .12em; margin: 4px 0 12px; line-height: 1.1;
+  font-size: 3.6rem; font-size: clamp(2.6rem, 9vw, 4.4rem); font-weight: 700; letter-spacing: .12em; margin: 4px 0 12px; line-height: 1.1;
 }
 
 .pair-grid { display: grid; gap: 28px; grid-template-columns: auto 1fr; align-items: center; margin: 22px 0; }
@@ -105,13 +106,13 @@ input[type=text], input[type=search], select {
 }
 .notice.info { border-left-color: var(--accent); }
 
-dialog { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; max-width: min(92vw, 440px); }
+dialog { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; max-width: 92vw; width: 440px; }
 dialog::backdrop { background: rgb(0 0 0 / .6); }
 dialog .actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
 dialog strong { word-break: break-word; }
 
 /* Receiver stage */
-.stage { position: fixed; inset: 0; background: #000; display: grid; place-items: center; }
+.stage { position: fixed; top: 0; right: 0; bottom: 0; left: 0; background: #000; display: grid; place-items: center; }
 .stage video { width: 100%; height: 100%; object-fit: contain; background: #000; }
 .toolbar {
   position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: center;
@@ -123,5 +124,23 @@ dialog strong { word-break: break-word; }
 .toolbar.idle:not(:focus-within) { opacity: 0; pointer-events: none; }
 .stats { font-variant-numeric: tabular-nums; font-size: .85rem; color: #b5c0cc; padding: 0 8px; }
 .overlay-msg { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); background: rgb(13 17 23 / .88); color: #e6edf3; padding: 8px 16px; border-radius: 99px; font-size: .95rem; }
+
+/* Browsers without <dialog> get the same box as a plain overlay. */
+dialog.fallback { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 10; display: none; box-shadow: 0 0 0 100vmax rgb(0 0 0 / .6); }
+dialog.fallback[open] { display: block; }
+
+/* Anything reachable with a remote control must show where the focus is. */
+button:focus, select:focus, a:focus { outline: 3px solid var(--accent); outline-offset: 3px; }
+
+/* TV: read from across the room, driven by a remote. */
+html.tv { font-size: 150%; }
+html.tv .page { max-width: 1100px; padding-top: 24px; }
+html.tv .qr { width: 300px; height: 300px; }
+html.tv .qr-caption { width: 300px; }
+html.tv .big-code { font-size: 5rem; }
+html.tv button { min-height: 52px; padding: 10px 24px; font-size: 1.1rem; }
+html.tv dialog { width: 640px; }
+html.tv .toolbar { bottom: 40px; }
+html.tv .overlay-msg { font-size: 1.3rem; top: 40px; }
 
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }

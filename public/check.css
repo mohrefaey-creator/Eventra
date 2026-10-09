@@ -1,0 +1,11 @@
+body { margin: 0; padding: 24px; background: #0d1117; color: #e6edf3; font: 20px/1.5 sans-serif; }
+h1 { font-size: 30px; margin: 0 0 8px; }
+#verdict { font-size: 28px; font-weight: bold; padding: 14px 18px; border-radius: 10px; margin: 14px 0 20px; background: #30363d; }
+#verdict.good { background: #1b7f3a; }
+#verdict.bad { background: #b62324; }
+table { border-collapse: collapse; width: 100%; }
+td { padding: 6px 10px; border-bottom: 1px solid #30363d; vertical-align: top; }
+td.name { width: 55%; }
+.ok { color: #3fb950; font-weight: bold; }
+.no { color: #ff6b6b; font-weight: bold; }
+.dim { color: #9aa7b4; font-size: 16px; word-break: break-all; }

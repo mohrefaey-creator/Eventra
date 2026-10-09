@@ -30,12 +30,15 @@ export function connectSignal() {
       let msg;
       try {
         msg = JSON.parse(event.data);
-      } catch {
+      } catch (err) {
         return;
       }
-      handlers.get(msg.type)?.(msg);
+      const handler = handlers.get(msg.type);
+      if (handler) handler(msg);
     };
-    ws.onclose = () => api.onClose?.();
+    ws.onclose = () => {
+      if (api.onClose) api.onClose();
+    };
   });
 }
 
@@ -51,7 +54,7 @@ export const $ = (id) => document.getElementById(id);
 export function readStore(key) {
   try {
     return localStorage.getItem(key);
-  } catch {
+  } catch (err) {
     return null;
   }
 }
@@ -59,7 +62,7 @@ export function readStore(key) {
 export function writeStore(key, value) {
   try {
     localStorage.setItem(key, value);
-  } catch {
+  } catch (err) {
     // private mode / blocked storage: the convenience just doesn't persist
   }
 }

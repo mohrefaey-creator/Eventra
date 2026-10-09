@@ -24,7 +24,8 @@ const MIME = {
   '.webmanifest': 'application/manifest+json',
 };
 
-const PAGES = { '/': 'index.html', '/receive': 'receive.html', '/send': 'send.html' };
+// /tv is the receiver again, in its big-print layout for a screen across the room; /check says what a browser supports.
+const PAGES = { '/': 'index.html', '/receive': 'receive.html', '/tv': 'receive.html', '/send': 'send.html', '/check': 'check.html' };
 
 const SECURITY_HEADERS = {
   'Content-Security-Policy':

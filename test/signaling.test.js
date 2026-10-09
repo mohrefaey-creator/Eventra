@@ -276,7 +276,7 @@ describe('server', async () => {
     });
 
   it('serves the pages with a strict CSP', async () => {
-    for (const path of ['/', '/receive', '/send']) {
+    for (const path of ['/', '/receive', '/tv', '/send', '/check']) {
       const res = await fetch(base + path);
       assert.equal(res.status, 200, path);
       assert.match(res.headers.get('content-security-policy'), /script-src 'self'/);

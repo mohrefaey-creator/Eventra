@@ -162,6 +162,55 @@ try {
   await phonePage.fill('#code', '654321'); // typing a new code updates the link
   assert.equal(new URL(await phonePage.getAttribute('#open-app', 'href')).searchParams.get('code'), '654321');
   console.log('ok  phones are offered the app, with server and code in the deep link');
+
+  // --- a TV: big-print layout at /tv, and an approval box that works even without <dialog>
+  const tv = await ctx.newPage();
+  tv.on('pageerror', (e) => console.error('[tv] page error:', e.message));
+  await tv.addInitScript(() => {
+    delete HTMLDialogElement.prototype.showModal;
+    delete HTMLDialogElement.prototype.close;
+  });
+  await tv.setViewportSize({ width: 1280, height: 720 });
+  await tv.goto(`http://127.0.0.1:${server.httpPort}/tv`);
+  await tv.waitForFunction(() => /^\d{3} \d{3}$/.test(document.getElementById('code').textContent));
+  assert.equal(await tv.evaluate(() => document.documentElement.classList.contains('tv')), true, 'TV layout at /tv');
+  assert.equal(await tv.evaluate(() => getComputedStyle(document.documentElement).fontSize), '24px', 'TV text is larger');
+  const tvCode = (await tv.textContent('#code')).replace(/\D/g, '');
+  const tvSender = await ctx.newPage();
+  await tvSender.addInitScript(() => {
+    navigator.mediaDevices.getDisplayMedia = async () => {
+      const canvas = Object.assign(document.createElement('canvas'), { width: 640, height: 360 });
+      const g = canvas.getContext('2d');
+      setInterval(() => {
+        g.fillStyle = `hsl(${Math.random() * 360} 80% 50%)`;
+        g.fillRect(0, 0, 640, 360);
+      }, 33);
+      return canvas.captureStream(30);
+    };
+  });
+  await tvSender.goto(`https://127.0.0.1:${server.httpsPort}/send?code=${tvCode}`);
+  await tvSender.fill('#name', 'Remote test');
+  await tvSender.click('#start');
+  await tv.waitForSelector('dialog.fallback[open]');
+  assert.equal(await tv.textContent('#requester'), 'Remote test');
+  await tv.click('#request button[value=allow]');
+  await tv.waitForFunction(
+    () => {
+      const v = document.getElementById('video');
+      return v.videoWidth === 640 && v.currentTime > 0.5;
+    },
+    null,
+    { timeout: 20_000 },
+  );
+  console.log('ok  TV layout at /tv; approval works without <dialog>; video plays');
+
+  // --- the screen-check page says "should work" in a modern browser and is not blocked by the CSP
+  const check = await ctx.newPage();
+  check.on('console', (m) => m.type() === 'error' && console.error('[check] console:', m.text()));
+  await check.goto(`http://127.0.0.1:${server.httpPort}/check`);
+  await check.waitForFunction(() => document.getElementById('verdict').className === 'good');
+  assert.match(await check.textContent('#verdict'), /should work/);
+  console.log('ok  /check recognises a capable browser');
 } catch (err) {
   failed = true;
   console.error('\nE2E FAILED:', err);
