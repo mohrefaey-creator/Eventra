@@ -1,0 +1,23 @@
+{
+  "name": "mirrorlink",
+  "version": "0.1.0",
+  "description": "Pair a device with a code or QR and mirror its screen to any browser over WebRTC.",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "test": "node --test test/signaling.test.js",
+    "test:e2e": "node test/e2e.mjs"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4",
+    "selfsigned": "^5.5.0",
+    "ws": "^8.22.0"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.64.0"
+  }
+}

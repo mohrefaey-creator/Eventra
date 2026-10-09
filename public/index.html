@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>MirrorLink</title>
+  <meta name="description" content="Pair two devices with a code or QR and mirror a screen to any browser.">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="page">
+    <header class="brand"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="4" width="19" height="12.5" rx="2"/><path d="M8 20.5h8M12 16.5v4"/><path d="M9 10.2a4 4 0 0 1 6 0M10.7 12.4a1.5 1.5 0 0 1 2.6 0"/></svg><span>MirrorLink</span></header>
+    <h1>Mirror a screen in two steps</h1>
+    <p class="lead">Show a pairing code on one screen, enter it on the other. The picture goes straight between the two devices.</p>
+
+    <div class="cards">
+      <a class="card" href="/receive">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="4" width="19" height="12.5" rx="2"/><path d="M8 20.5h8M12 16.5v4"/></svg>
+        <h2>Show a mirror on this screen</h2>
+        <p class="muted">Use this on the computer or TV that will display the picture. You get a code and a QR.</p>
+        <span class="tag">Receiver</span>
+      </a>
+      <a class="card" href="/send" id="send-card">
+        <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="7" y="2.5" width="10" height="19" rx="2"/><path d="M11 18.5h2"/></svg>
+        <h2>Share this device's screen</h2>
+        <p class="muted">Enter the code from the receiving screen and choose what to share.</p>
+        <span class="tag" id="send-tag">Sender</span>
+      </a>
+    </div>
+
+    <details>
+      <summary>Good to know: phones, iPads and Bluetooth</summary>
+      <ul>
+        <li><strong>Wi-Fi, not Bluetooth.</strong> Bluetooth is far too slow to carry live screen video, and browsers can't use it for that. Both devices just need to be on the same Wi-Fi (or have internet).</li>
+        <li><strong>Browser limits.</strong> iPhone and iPad Safari, and most Android browsers, can't capture their own screen from a web page. Desktop browsers (Chrome, Edge, Firefox, Safari on Mac) can.</li>
+        <li><strong>To mirror a phone or tablet</strong> use the system feature (AirPlay on iPhone/iPad, Cast on Android) or a native sender app speaking the MirrorLink protocol (see <code>docs/PROTOCOL.md</code>).</li>
+      </ul>
+    </details>
+  </main>
+  <script type="module" src="/landing.js"></script>
+</body>
+</html>

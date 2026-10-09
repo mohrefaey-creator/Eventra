@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Share screen - MirrorLink</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="page">
+    <header class="brand"><a href="/"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="4" width="19" height="12.5" rx="2"/><path d="M8 20.5h8M12 16.5v4"/><path d="M9 10.2a4 4 0 0 1 6 0M10.7 12.4a1.5 1.5 0 0 1 2.6 0"/></svg><span>MirrorLink</span></a></header>
+    <h1>Share this device's screen</h1>
+    <p class="lead">Enter the code shown on the receiving screen.</p>
+
+    <div id="unsupported" class="notice" hidden></div>
+
+    <form class="panel" id="form" autocomplete="off" novalidate>
+      <div class="field">
+        <label for="code">Pairing code</label>
+        <input id="code" class="code-input" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="7" placeholder="000 000" autocomplete="one-time-code" aria-describedby="status">
+      </div>
+      <div class="field">
+        <label for="name">This device's name</label>
+        <input id="name" type="text" maxlength="40" placeholder="e.g. Sam's laptop">
+      </div>
+      <div class="field">
+        <label for="quality">Quality</label>
+        <select id="quality">
+          <option value="balanced">Balanced</option>
+          <option value="sharp">Sharp text (more bandwidth)</option>
+          <option value="saver">Smooth, low bandwidth</option>
+        </select>
+      </div>
+      <div class="field">
+        <label class="check"><input type="checkbox" id="audio"> Share sound too (where the browser supports it)</label>
+      </div>
+      <button class="primary" id="start" type="submit">Choose screen &amp; connect</button>
+      <button id="stop" type="button" class="danger" hidden>Stop sharing</button>
+      <p id="status" class="status" role="status"></p>
+    </form>
+  </main>
+  <script type="module" src="/send.js"></script>
+</body>
+</html>

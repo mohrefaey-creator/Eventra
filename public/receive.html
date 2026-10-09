@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Receive - MirrorLink</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <main class="page" id="pairing">
+    <header class="brand"><a href="/"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2.5" y="4" width="19" height="12.5" rx="2"/><path d="M8 20.5h8M12 16.5v4"/><path d="M9 10.2a4 4 0 0 1 6 0M10.7 12.4a1.5 1.5 0 0 1 2.6 0"/></svg><span>MirrorLink</span></a></header>
+    <h1>Mirror a device to this screen</h1>
+    <ol class="steps">
+      <li>On the device you want to mirror, scan the QR code or open the address below.</li>
+      <li>Enter the code if asked, then choose what to share.</li>
+      <li>Approve the request that appears here.</li>
+    </ol>
+
+    <div class="panel">
+      <div id="warning" class="notice" hidden></div>
+      <div class="pair-grid">
+        <div>
+          <div class="qr"><img id="qr" alt="QR code that opens the sender page with this code filled in" width="200" height="200"></div>
+          <p class="qr-caption">Scan with the device's camera</p>
+        </div>
+        <div>
+          <p class="muted small flush">Pairing code</p>
+          <p class="big-code" id="code" aria-live="polite">------</p>
+          <p class="small">Open <strong id="sender-url">…</strong> on the other device and enter this code.</p>
+          <div class="field" id="origin-field" hidden>
+            <label for="origin">Network address</label>
+            <select id="origin"></select>
+          </div>
+          <button id="new-code" type="button">New code</button>
+        </div>
+      </div>
+      <p id="status" class="status" role="status"></p>
+    </div>
+  </main>
+
+  <section class="stage" id="stage" hidden>
+    <video id="video" autoplay playsinline muted></video>
+    <div class="overlay-msg" id="overlay" role="status" hidden></div>
+    <div class="toolbar" id="toolbar">
+      <span class="who" id="who"></span>
+      <span class="stats" id="stats" aria-label="Stream statistics"></span>
+      <button id="mute" type="button" aria-pressed="true">Unmute</button>
+      <button id="fullscreen" type="button">Full screen</button>
+      <button id="disconnect" type="button" class="danger">Disconnect</button>
+    </div>
+  </section>
+
+  <dialog id="request" aria-labelledby="request-title">
+    <form method="dialog">
+      <h2 id="request-title">Allow screen mirroring?</h2>
+      <p><strong id="requester"></strong> wants to show its screen here.</p>
+      <p class="muted small">Only allow devices you recognise. You can disconnect at any time.</p>
+      <div class="actions">
+        <button value="deny">Deny</button>
+        <button value="allow" class="primary" autofocus>Allow</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script type="module" src="/receive.js"></script>
+</body>
+</html>
