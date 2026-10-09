@@ -64,6 +64,9 @@ public final class SenderSession: NSObject {
     private let peer: Peer
     private weak var listener: SenderSessionListener?
     private let bridge = PeerBridge()
+    /// Optional running commentary ("info fetched", "socket closed: ..."), for finding out why a first run on a
+    /// real device went quiet. Set before `start()`; called on the session's queue.
+    public var trace: ((String) -> Void)?
     fileprivate let worker = DispatchQueue(label: "app.mirrorlink.session")
 
     // Only touched on `worker`.
@@ -91,6 +94,7 @@ public final class SenderSession: NSObject {
     public func start() {
         worker.async {
             guard self.state == .idle else { return } // a session is single use; ignore a second start
+            self.trace?("session starts, server \(self.server)")
             self.setState(.connecting)
             let server = self.server
             // The HTTP fetch must not block the queue: stop() has to stay responsive meanwhile.
@@ -99,10 +103,16 @@ public final class SenderSession: NSObject {
                 do {
                     info = try ServerInfo.fetch(session: .shared, server: server)
                 } catch {
-                    self.worker.async { self.end(.serverUnreachable) }
+                    self.worker.async {
+                        self.trace?("server info failed: \(error)")
+                        self.end(.serverUnreachable)
+                    }
                     return
                 }
-                self.worker.async { self.openSocket(info) }
+                self.worker.async {
+                    self.trace?("server info ok, \(info.iceServers.count) ice server(s)")
+                    self.openSocket(info)
+                }
             }
         }
     }
@@ -130,6 +140,7 @@ public final class SenderSession: NSObject {
             end(.error)
             return
         }
+        trace?("opening \(url.absoluteString)")
         let queue = OperationQueue()
         queue.maxConcurrentOperationCount = 1
         queue.underlyingQueue = worker // delegate callbacks arrive on the same serial queue
@@ -156,9 +167,14 @@ public final class SenderSession: NSObject {
         switch result {
         case .success(let message):
             socketOpen = true
-            if case .string(let text) = message { handle(Wire.parse(text)) }
+            if case .string(let text) = message {
+                let parsed = Wire.parse(text)
+                trace?("received \(String(String(describing: parsed).prefix(40)))")
+                handle(parsed)
+            }
             if state != .ended { listen(to: io) }
-        case .failure:
+        case .failure(let error):
+            trace?("receive failed: \(error)")
             socketGone()
         }
     }
@@ -191,6 +207,7 @@ public final class SenderSession: NSObject {
         case .waiting:
             setState(.waitingApproval)
         case .accepted:
+            trace?("approved, starting video")
             setState(.negotiating)
             peer.start(iceServers: iceServers, listener: bridge)
         case .rejected(let reason):
@@ -243,6 +260,7 @@ public final class SenderSession: NSObject {
     private func end(_ reason: EndReason) {
         if state == .ended { return }
         state = .ended
+        trace?("session ended: \(reason)")
         closeSocket()
         peer.close()
         listener?.sessionDidEnd(reason: reason)
@@ -294,7 +312,10 @@ public final class SenderSession: NSObject {
 
 extension SenderSession: URLSessionWebSocketDelegate {
     public func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
-        if webSocketTask === socket?.task { socketOpen = true }
+        if webSocketTask === socket?.task {
+            socketOpen = true
+            trace?("socket open")
+        }
     }
 
     public func urlSession(
@@ -303,10 +324,16 @@ extension SenderSession: URLSessionWebSocketDelegate {
         didCloseWith closeCode: URLSessionWebSocketTask.CloseCode,
         reason: Data?
     ) {
-        if webSocketTask === socket?.task { socketGone() }
+        if webSocketTask === socket?.task {
+            trace?("socket closed, code \(closeCode.rawValue)")
+            socketGone()
+        }
     }
 
     public func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        if task === socket?.task { socketGone() }
+        if task === socket?.task {
+            trace?("socket task finished: \(error.map { "\($0)" } ?? "no error")")
+            socketGone()
+        }
     }
 }

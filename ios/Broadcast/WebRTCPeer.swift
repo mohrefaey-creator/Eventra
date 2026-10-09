@@ -10,6 +10,7 @@ import WebRTC
 /// `SenderSession` decides when to start and stop it; it never touches signaling itself.
 final class WebRTCPeer: NSObject, Peer {
     private let quality: Quality
+    var trace: ((String) -> Void)?
     private let lock = NSLock()
     private let queue = DispatchQueue(label: "app.mirrorlink.webrtc")
 
@@ -37,6 +38,7 @@ final class WebRTCPeer: NSObject, Peer {
     // MARK: - Peer
 
     func start(iceServers: [IceServer], listener: PeerListener) {
+        trace?("start, \(iceServers.count) ice server(s)")
         lock.lock()
         if closed {
             lock.unlock()
@@ -89,13 +91,16 @@ final class WebRTCPeer: NSObject, Peer {
 
         connection.offer(for: constraints) { [weak self] description, error in
             guard let self = self, let description = description, error == nil else {
+                self?.trace?("offer failed: \(String(describing: error))")
                 listener.peerDidFail()
                 return
             }
             connection.setLocalDescription(description) { error in
                 if error != nil {
+                    self.trace?("setLocalDescription failed: \(String(describing: error))")
                     listener.peerDidFail()
                 } else {
+                    self.trace?("offer ready")
                     self.listener?.peerDidCreateLocalDescription(SessionDescription(type: "offer", sdp: description.sdp))
                 }
             }
@@ -246,6 +251,7 @@ extension WebRTCPeer: RTCPeerConnectionDelegate {
     }
 
     func peerConnection(_ peerConnection: RTCPeerConnection, didChange newState: RTCPeerConnectionState) {
+        trace?("connection state \(newState.rawValue)")
         switch newState {
         case .connected:
             listener?.peerDidConnect()

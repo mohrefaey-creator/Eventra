@@ -351,6 +351,34 @@ describe('server', async () => {
 
 // ------------------------------------------------------- native app support
 
+describe('debug log for new sender apps', async () => {
+  const off = await startServer({ port: 0, tls: false, quiet: true, host: '127.0.0.1' });
+  const on = await startServer({ port: 0, tls: false, quiet: true, host: '127.0.0.1', diag: true });
+  after(async () => {
+    await off.close();
+    await on.close();
+  });
+
+  it('does not exist unless it is switched on', async () => {
+    const res = await fetch(`http://127.0.0.1:${off.httpPort}/api/diag`, { method: 'POST', body: 'hello' });
+    assert.equal(res.status, 405);
+    assert.equal((await fetch(`http://127.0.0.1:${off.httpPort}/api/diag`)).status, 404);
+  });
+
+  it('keeps what an app posts and shows it back, bounded', async () => {
+    const url = `http://127.0.0.1:${on.httpPort}/api/diag`;
+    assert.equal((await fetch(url, { method: 'POST', body: '[ext] started\nsecond line' })).status, 204);
+    assert.equal((await fetch(url, { method: 'POST', body: 'x'.repeat(5000) })).status, 204);
+    const text = await (await fetch(url)).text();
+    assert.match(text, /\[ext\] started second line/);
+    assert.ok(text.split('\n').every((line) => line.length < 1100), 'lines are cut to a sane length');
+    for (let i = 0; i < 320; i++) await fetch(url, { method: 'POST', body: `line ${i}` });
+    const lines = (await (await fetch(url)).text()).trim().split('\n');
+    assert.equal(lines.length, 300);
+    assert.match(lines.at(-1), /line 319$/);
+  });
+});
+
 describe('native app support', async () => {
   const fp = 'A1:B2:C3:D4:E5:F6:07:18:29:3A:4B:5C:6D:7E:8F:90:A1:B2:C3:D4:E5:F6:07:18:29:3A:4B:5C:6D:7E:8F:90';
 

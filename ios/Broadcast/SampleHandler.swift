@@ -9,14 +9,18 @@ final class SampleHandler: RPBroadcastSampleHandler, SenderSessionListener {
     private lazy var suite: String? = AppIdentity.sharedSuite()
 
     override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
+        Diag.log("broadcast started | " + AppIdentity.describe().replacingOccurrences(of: "\n", with: " | "))
         guard let suite = suite else {
+            Diag.log("no shared storage, stopping")
             finish("MirrorLink could not share settings with its broadcast part.\n" + AppIdentity.describe())
             return
         }
         guard let config = SharedStore.load(suite: suite) else {
+            Diag.log("no saved request found in \(suite), stopping")
             finish("Open MirrorLink, type the code, then tap Start mirroring.")
             return
         }
+        Diag.log("request found: server \(config.server), code ends \(config.code.suffix(2)), quality \(config.quality.rawValue)", server: config.server)
         SharedStore.clearConfig(suite: suite) // a code is good for one attempt
         report(.connecting, "Connecting…")
 
@@ -28,6 +32,8 @@ final class SampleHandler: RPBroadcastSampleHandler, SenderSessionListener {
             peer: peer,
             listener: self
         )
+        peer.trace = { Diag.log("video: " + $0, server: config.server) }
+        session.trace = { Diag.log("session: " + $0, server: config.server) }
         self.peer = peer
         self.session = session
         session.start()
@@ -39,6 +45,7 @@ final class SampleHandler: RPBroadcastSampleHandler, SenderSessionListener {
 
     /// The person stopped sharing (Control Center, or the red status bar).
     override func broadcastFinished() {
+        Diag.log("broadcast finished by iOS or the person")
         session?.stop()
     }
 

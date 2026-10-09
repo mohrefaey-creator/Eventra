@@ -91,6 +91,9 @@ export async function startServer(options = {}) {
     androidPackage = 'app.mirrorlink',
     androidCertSha256 = [],
     signaling: signalingOptions,
+    // Debug aid for first runs of a new sender app: lets it post short lines to /api/diag and lets you read them
+    // back. Off unless DIAG=1; keeps only the last 300 lines, in memory.
+    diag = false,
     quiet = false,
   } = options;
   const certFingerprints = androidCertSha256.map(normalizeFingerprint).filter(Boolean);
@@ -100,6 +103,7 @@ export async function startServer(options = {}) {
 
   const lan = lanAddresses();
   const signaling = createSignaling(signalingOptions);
+  const diagLines = [];
   let boundHttpsPort = null;
 
   function senderOrigins(req) {
@@ -114,6 +118,24 @@ export async function startServer(options = {}) {
   async function handle(req, res) {
     const url = new URL(req.url, 'http://x');
     for (const [k, v] of Object.entries(SECURITY_HEADERS)) res.setHeader(k, v);
+
+    if (diag && url.pathname === '/api/diag') {
+      if (req.method === 'POST') {
+        let body = '';
+        req.on('data', (chunk) => {
+          if (body.length < 2048) body += chunk;
+        });
+        req.on('end', () => {
+          diagLines.push(`${new Date().toISOString()} ${body.replace(/[\r\n]+/g, ' ').slice(0, 1000)}`);
+          while (diagLines.length > 300) diagLines.shift();
+          res.writeHead(204).end();
+        });
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(`${diagLines.join('\n')}\n`);
+      return;
+    }
 
     if (req.method !== 'GET' && req.method !== 'HEAD') {
       res.writeHead(405, { Allow: 'GET, HEAD' }).end();
@@ -315,6 +337,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     tls: env.TLS !== 'off',
     publicUrl: env.PUBLIC_URL || '',
     trustProxy: env.TRUST_PROXY === '1',
+    diag: env.DIAG === '1',
     turn: env.TURN_URLS && env.TURN_SECRET
       ? {
           urls: env.TURN_URLS.split(',').map((u) => u.trim()).filter(Boolean),
