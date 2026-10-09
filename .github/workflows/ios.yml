@@ -77,6 +77,13 @@ jobs:
           ldid -S/tmp/MirrorLink.entitlements "$APP/MirrorLink"
           ldid -S/tmp/MirrorLinkBroadcast.entitlements "$EXT/MirrorLinkBroadcast"
 
+          # The broadcast extension needs WebRTC next to it. If the framework did not make it into the app,
+          # the extension would crash the moment iOS starts it, so refuse to produce such a file.
+          echo "--- what is inside the app"
+          find "$APP" -maxdepth 3 \( -name '*.framework' -o -name '*.appex' \) | sort
+          otool -L "$EXT/MirrorLinkBroadcast" | grep -i -E 'webrtc|@rpath' || true
+          test -d "$APP/Frameworks/WebRTC.framework" || { echo "::error::WebRTC.framework is missing from the app"; exit 1; }
+
           mkdir Payload
           cp -R "$APP" Payload/
           zip -qry MirrorLink.ipa Payload
