@@ -31,6 +31,7 @@ let pc = null;
 let pendingPeer = null; // { id, name } while the approval dialog is open
 let signalChain = Promise.resolve();
 let statsTimer = null;
+let waitTimer = null;
 let idleTimer = null;
 let wakeLock = null;
 let reconnectDelay = 1000;
@@ -147,6 +148,7 @@ function startPeer(peer) {
   setStatus(`Connecting to ${peer.name}…`);
   pc = new RTCPeerConnection({ iceServers: info.iceServers });
   const mine = pc;
+  watchFirstPicture(mine, peer.name);
 
   pc.onicecandidate = (e) => {
     if (e.candidate) sig.send({ type: 'signal', data: { candidate: e.candidate } });
@@ -169,6 +171,45 @@ function startPeer(peer) {
       );
     }
   };
+}
+
+/**
+ * Until the first picture plays, say how far along the connection is. A still screen sends nothing, so
+ * "connected but no picture yet" is a state worth showing rather than a frozen "Connecting…".
+ */
+function watchFirstPicture(mine, name) {
+  clearInterval(waitTimer);
+  let connectedFor = 0;
+  waitTimer = setInterval(async () => {
+    if (pc !== mine || !els.stage.hidden) {
+      clearInterval(waitTimer);
+      return;
+    }
+    let bytes = 0;
+    let decoded = 0;
+    try {
+      for (const s of (await mine.getStats()).values()) {
+        if (s.type === 'inbound-rtp' && s.kind === 'video') {
+          bytes = s.bytesReceived ?? 0;
+          decoded = s.framesDecoded ?? 0;
+        }
+      }
+    } catch {
+      return;
+    }
+    if (mine.connectionState !== 'connected') {
+      setStatus(`Connecting to ${name}… (${mine.iceConnectionState})`);
+      return;
+    }
+    connectedFor += 1.5;
+    const kb = `${Math.round(bytes / 1024)} KB received`;
+    const hint = connectedFor > 6 ? " If nothing appears, touch the other device's screen." : '';
+    setStatus(
+      decoded
+        ? `Connected to ${name}. Starting the picture…`
+        : `Connected to ${name}. Waiting for the first picture… (${kb}).${hint}`,
+    );
+  }, 1500);
 }
 
 async function handleSignal(data) {
@@ -204,6 +245,8 @@ function showPairing() {
 
 function teardownPeer() {
   clearInterval(statsTimer);
+  clearInterval(waitTimer);
+  waitTimer = null;
   clearTimeout(idleTimer);
   statsTimer = null;
   if (pc) {

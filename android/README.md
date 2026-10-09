@@ -14,8 +14,8 @@ No Google Play Services are used, so it also works on Honor and other devices wi
 
 | | |
 |---|---|
-| **Verified** | A real Gradle build (AGP 8.11, Kotlin 2.2, JDK 17) produces a signed debug APK (21 MB, arm64-v8a + armeabi-v7a, Android 8.0 to 16). 43 unit tests pass: 25 for the pairing core (9 run the real Node server) and 18 Robolectric tests that drive the real screens and service (form, code formatting, deep links, the notification, capture-consent and service flow, Stop button, failure paths). Android Lint reports no errors. The APK's manifest, permissions and signature were inspected with `aapt2` and `apksigner`. |
-| **Not verified** | Anything that needs a physical device: installing, the system screen-capture prompt, actual video reaching the receiver, App Links verification, foreground-service behaviour on Android 14 to 16, Honor and Samsung specifics. Release builds (`assembleRelease`) and the x86 emulator (the build ships ARM libraries only) were not exercised. The first run on a real device is the real test. |
+| **Verified** | A real Gradle build (AGP 8.11, Kotlin 2.2, JDK 17) produces a signed debug APK (21 MB, v0.1.1, arm64-v8a + armeabi-v7a, Android 8.0 to 16). 43 unit tests pass: 25 for the pairing core (9 run the real Node server) and 18 Robolectric tests that drive the real screens and service (form, code formatting, deep links, the notification, capture-consent and service flow, Stop button, failure paths). Android Lint reports no errors. The APK's manifest, permissions and signature were inspected with `aapt2` and `apksigner`. |
+| **Not verified** | Anything that needs a physical device: installing, the system screen-capture prompt, actual video reaching the receiver, App Links verification, foreground-service behaviour on Android 14 to 16, Honor and Samsung specifics. Release builds (`assembleRelease`) and the x86 emulator (the build ships ARM libraries only) were not exercised. A first run on a real tablet (Honor NDL-L09) paired and connected, but showed no picture: see "Still screens" below. |
 
 Where the build ran: a Linux microVM with the Android SDK, because the machine this was written on cannot
 reach Google's Maven repository. The recipe is the same as the one below; nothing in it is special.
@@ -88,3 +88,12 @@ core/   Pure Kotlin: link parsing, protocol messages, SenderSession state machin
 app/    The Android app: MainActivity (UI), MirrorService (foreground service), WebRtcPeer (capture + WebRTC)
         ./gradlew :app:testDebugUnitTest    (Robolectric UI/service tests; first run downloads Android jars)
 ```
+
+## Still screens
+
+Android only delivers a frame when the screen changes. Capture starts before the receiver is connected, so
+the one frame a still screen produces is lost, and the receiver stays blank until something moves. Since
+v0.1.1 `WebRtcPeer` asks for a fresh frame as soon as the connection is up and again every few seconds
+while the screen is still (it re-attaches the capture surface, which libwebrtc 150 does with
+`VirtualDisplay.resize`/`setSurface`, so it is safe on Android 14+). The receiver page now also says
+"Connected, waiting for the first picture" instead of staying on "Connecting".

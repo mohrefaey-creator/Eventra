@@ -54,7 +54,22 @@ class WebRtcPeer(
     private var connection: PeerConnection? = null
     private var displayListener: DisplayManager.DisplayListener? = null
     private var captureSize = 0 to 0
+    private var lastFrameCount = -1L
     private var closed = false
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    /** Wakes up while connected and asks for a fresh frame if the screen has been still. */
+    private val stillScreenCheck = object : Runnable {
+        override fun run() {
+            synchronized(this@WebRtcPeer) {
+                if (closed) return
+                val count = capturer?.numCapturedFrames ?: return
+                if (count == lastFrameCount) refreshFrame()
+                lastFrameCount = count
+            }
+            mainHandler.postDelayed(this, STILL_SCREEN_CHECK_MS)
+        }
+    }
 
     /**
      * Starts capturing right away, before the receiver has approved anything. Android's one-time capture
@@ -106,6 +121,7 @@ class WebRtcPeer(
         }
         connection = pc
         tune(pc.addTrack(track, listOf("mirrorlink")))
+        mainHandler.postDelayed(stillScreenCheck, STILL_SCREEN_CHECK_MS)
 
         pc.createOffer(
             object : SimpleSdpObserver() {
@@ -145,6 +161,7 @@ class WebRtcPeer(
     override fun close() {
         if (closed) return
         closed = true
+        mainHandler.removeCallbacksAndMessages(null)
         displayListener?.let { displayManager().unregisterDisplayListener(it) }
         displayListener = null
         connection?.close()
@@ -177,7 +194,13 @@ class WebRtcPeer(
 
         override fun onConnectionChange(newState: PeerConnection.PeerConnectionState) {
             when (newState) {
-                PeerConnection.PeerConnectionState.CONNECTED -> listener.onConnected()
+                PeerConnection.PeerConnectionState.CONNECTED -> {
+                    listener.onConnected()
+                    // Nothing was listening when capture began, and a screen that does not change sends no
+                    // new frames, so the receiver would stay blank. Ask Android to draw the screen again.
+                    mainHandler.post { refreshNow() }
+                    mainHandler.postDelayed({ refreshNow() }, FIRST_PICTURE_RETRY_MS)
+                }
                 PeerConnection.PeerConnectionState.FAILED -> listener.onFailed()
                 else -> Unit // DISCONNECTED often recovers by itself; FAILED is the real end
             }
@@ -192,6 +215,23 @@ class WebRtcPeer(
         override fun onRemoveStream(stream: MediaStream) = Unit
         override fun onDataChannel(channel: DataChannel) = Unit
         override fun onRenegotiationNeeded() = Unit
+    }
+
+    @Synchronized
+    private fun refreshNow() {
+        if (!closed) refreshFrame()
+    }
+
+    /**
+     * Re-attaches the capture surface, which makes Android deliver the current screen even if nothing
+     * changed. A failed nudge is not worth ending the session over.
+     */
+    private fun refreshFrame() {
+        try {
+            capturer?.changeCaptureFormat(captureSize.first, captureSize.second, quality.fps)
+        } catch (_: RuntimeException) {
+            // The next check tries again.
+        }
     }
 
     /** Cap the bitrate for the chosen quality and keep text sharp rather than letting resolution drop. */
@@ -251,6 +291,8 @@ class WebRtcPeer(
     }
 
     private companion object {
+        private const val STILL_SCREEN_CHECK_MS = 1500L
+        private const val FIRST_PICTURE_RETRY_MS = 1000L
         private var initialized = false
 
         @Synchronized
