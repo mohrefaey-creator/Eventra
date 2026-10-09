@@ -85,3 +85,16 @@ Shared/           the little bit both of them use
 project.yml       XcodeGen description of the two targets
 scripts/          make_icon.py redraws the app icon
 ```
+
+## If Start Broadcast does nothing
+
+Re-signing tools change the app's identifiers, so the app finds its own parts at run time instead of trusting
+the names in `project.yml` (see `Shared/AppIdentity.swift`). The grey lines at the bottom of the app's screen
+say what it found:
+
+- `broadcast part: NOT FOUND` means the extension was not installed with the app.
+- `shared storage: NONE` means the signer did not give the app and its extension a common App Group, so the
+  code you type cannot reach the extension. Send those lines to whoever is helping you.
+
+A second way in, if the Start button does not open Apple's sheet: after typing the code in the app, open
+Control Center, press and hold the grey record button, pick **MirrorLink**, and tap **Start Broadcast**.
