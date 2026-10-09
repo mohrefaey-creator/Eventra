@@ -6,7 +6,8 @@ import UIKit
 /// broadcast sheet. The actual capture runs in the broadcast extension (see Broadcast/SampleHandler.swift).
 final class MainViewController: UIViewController, UITextFieldDelegate {
     private let defaults = UserDefaults.standard
-    private let groupSuite = SharedStore.groupIdentifier(forBundleIdentifier: Bundle.main.bundleIdentifier)
+    private lazy var groupSuite: String? = AppIdentity.sharedSuite()
+    private var refreshTimer: Timer?
 
     private var server: String
     private var quality: Quality
@@ -21,7 +22,8 @@ final class MainViewController: UIViewController, UITextFieldDelegate {
     private lazy var qualityControl = UISegmentedControl(items: Quality.allCases.map(\.label))
     private let startButton = UIButton(type: .system)
     private let statusLabel = UILabel()
-    private let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 44, height: 44))
+    private let diagnosticsLabel = UILabel()
+    private let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 200, height: 54))
 
     init() {
         let configured = Bundle.main.object(forInfoDictionaryKey: "MirrorLinkServer") as? String ?? ""
@@ -47,6 +49,15 @@ final class MainViewController: UIViewController, UITextFieldDelegate {
         NotificationCenter.default.addObserver(self, selector: #selector(captureChanged), name: UIApplication.didBecomeActiveNotification, object: nil)
         statusToken = DarwinNotifier.observe(DarwinNotifier.statusChanged) { [weak self] in self?.reflectBroadcast() }
         LocalNetworkPermission.requestOnce()
+        syncForm()
+        // The extension ignores a request older than ten minutes, so keep it fresh while this screen is open.
+        refreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in self?.syncForm(refreshOnly: true) }
+    }
+
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // Apple's picker keeps a small button inside; stretch it so a tap anywhere on "Start mirroring" reaches it.
+        picker.subviews.compactMap { $0 as? UIButton }.first?.frame = picker.bounds
     }
 
     // MARK: - links
@@ -62,6 +73,7 @@ final class MainViewController: UIViewController, UITextFieldDelegate {
         defaults.set(link.server, forKey: "server")
         showServer()
         codeField.text = formatCode(link.code)
+        syncForm()
         show("Ready. Tap Start mirroring.")
     }
 
@@ -69,33 +81,41 @@ final class MainViewController: UIViewController, UITextFieldDelegate {
 
     @objc private func startTapped() {
         view.endEditing(true)
+        syncForm()
+        if let problem = currentConfig().problem {
+            show(problem, problem: true)
+        } else if groupSuite == nil {
+            show("This copy of the app cannot share settings with its broadcast part.\n\n" + AppIdentity.describe(), problem: true)
+        } else {
+            show("Tap Start mirroring once more, then Start Broadcast.")
+        }
+    }
+
+    /// The form as the broadcast extension needs it, or what is missing.
+    private func currentConfig() -> (config: BroadcastConfig?, problem: String?) {
         let code = PairingLinks.normalizeCode(codeField.text ?? "")
-        guard code.count == 6 else {
-            show("Enter the 6-digit code shown on the receiving screen.", problem: true)
-            return
-        }
-        guard let origin = PairingLinks.normalizeServer(server) else {
-            show("The server address is not valid. Tap Change to fix it.", problem: true)
-            return
-        }
+        guard code.count == 6 else { return (nil, "Enter the 6-digit code shown on the receiving screen.") }
+        guard let origin = PairingLinks.normalizeServer(server) else { return (nil, "The server address is not valid. Tap Change to fix it.") }
         let typedName = (nameField.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         let name = typedName.isEmpty ? UIDevice.current.name : typedName
-        defaults.set(name, forKey: "deviceName")
-        defaults.set(quality.rawValue, forKey: "quality")
+        return (BroadcastConfig(server: origin, code: code, deviceName: name, quality: quality, requestedAt: Date().timeIntervalSince1970), nil)
+    }
 
-        let config = BroadcastConfig(
-            server: origin,
-            code: code,
-            deviceName: name,
-            quality: quality,
-            requestedAt: Date().timeIntervalSince1970
-        )
-        guard SharedStore.save(config, suite: groupSuite) else {
-            show("This copy of the app cannot share settings with its broadcast part (App Group \(groupSuite) is missing).", problem: true)
+    /// Saves the form where the extension can read it, and lets the real Start button (Apple's picker, laid over
+    /// ours) be pressed only when the form is complete.
+    private func syncForm(refreshOnly: Bool = false) {
+        guard isViewLoaded else { return }
+        // While a broadcast is running its code is already used; do not put a fresh copy back for the next one.
+        if refreshOnly && UIScreen.main.isCaptured { return }
+        guard let config = currentConfig().config, let suite = groupSuite,
+              SharedStore.save(config, suite: suite, resetStatus: !refreshOnly)
+        else {
+            picker.isUserInteractionEnabled = false
             return
         }
-        show("In the sheet that opens, tap Start Broadcast.")
-        openBroadcastSheet()
+        defaults.set(config.deviceName, forKey: "deviceName")
+        defaults.set(config.quality.rawValue, forKey: "quality")
+        picker.isUserInteractionEnabled = true
     }
 
     @objc private func changeServerTapped() {
@@ -114,6 +134,7 @@ final class MainViewController: UIViewController, UITextFieldDelegate {
                 self.server = origin
                 self.defaults.set(origin, forKey: "server")
                 self.showServer()
+                self.syncForm()
             } else {
                 self.show("That is not a valid server address.", problem: true)
             }
@@ -124,30 +145,26 @@ final class MainViewController: UIViewController, UITextFieldDelegate {
     @objc private func qualityChanged() {
         quality = Quality.allCases[qualityControl.selectedSegmentIndex]
         defaults.set(quality.rawValue, forKey: "quality")
+        syncForm()
     }
 
     @objc private func codeEdited() {
         let digits = String(PairingLinks.normalizeCode(codeField.text ?? "").prefix(6))
         codeField.text = formatCode(digits)
+        syncForm()
     }
+
+    @objc private func nameEdited() { syncForm() }
 
     @objc private func captureChanged() { reflectBroadcast() }
 
     @objc private func dismissKeyboard() { view.endEditing(true) }
 
-    // MARK: - broadcast sheet
-
-    /// RPSystemBroadcastPickerView is a button; pressing it programmatically opens iOS's broadcast sheet with
-    /// our extension already chosen.
-    private func openBroadcastSheet() {
-        picker.subviews.compactMap { $0 as? UIButton }.first?.sendActions(for: .touchUpInside)
-    }
-
     // MARK: - status
 
     private func reflectBroadcast() {
         guard isViewLoaded else { return }
-        let status = SharedStore.readStatus(suite: groupSuite)
+        let status = groupSuite.flatMap { SharedStore.readStatus(suite: $0) }
         let recent = status.map { Date().timeIntervalSince1970 - $0.updatedAt < 6 * 3600 } ?? false
         if let status = status, recent {
             switch status.phase {
@@ -225,6 +242,7 @@ final class MainViewController: UIViewController, UITextFieldDelegate {
         nameField.autocorrectionType = .no
         nameField.returnKeyType = .done
         nameField.delegate = self
+        nameField.addTarget(self, action: #selector(nameEdited), for: .editingChanged)
         nameField.accessibilityLabel = "This device's name"
 
         qualityControl.selectedSegmentIndex = Quality.allCases.firstIndex(of: quality) ?? 0
@@ -241,16 +259,24 @@ final class MainViewController: UIViewController, UITextFieldDelegate {
         statusLabel.textColor = .secondaryLabel
         statusLabel.numberOfLines = 0
 
-        picker.preferredExtension = (Bundle.main.bundleIdentifier ?? "") + ".broadcast"
+        picker.preferredExtension = AppIdentity.broadcastExtensionID()
         picker.showsMicrophoneButton = false
         picker.alpha = 0.02
         picker.isAccessibilityElement = false
+        picker.isUserInteractionEnabled = false // switched on by syncForm() once the form is complete
+        picker.translatesAutoresizingMaskIntoConstraints = false
+        startButton.addSubview(picker)
+
+        diagnosticsLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
+        diagnosticsLabel.textColor = .tertiaryLabel
+        diagnosticsLabel.numberOfLines = 0
+        diagnosticsLabel.text = AppIdentity.describe()
 
         stack.axis = .vertical
         stack.spacing = 14
         stack.isLayoutMarginsRelativeArrangement = true
         stack.layoutMargins = UIEdgeInsets(top: 24, left: 20, bottom: 24, right: 20)
-        for item in [title, subtitle, serverRow, field("Pairing code", codeField), field("This device's name", nameField), field("Quality", qualityControl), startButton, statusLabel, picker] as [UIView] {
+        for item in [title, subtitle, serverRow, field("Pairing code", codeField), field("This device's name", nameField), field("Quality", qualityControl), startButton, statusLabel, diagnosticsLabel] as [UIView] {
             stack.addArrangedSubview(item)
         }
 
@@ -274,7 +300,10 @@ final class MainViewController: UIViewController, UITextFieldDelegate {
             codeField.heightAnchor.constraint(equalToConstant: 60),
             nameField.heightAnchor.constraint(equalToConstant: 44),
             startButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 54),
-            picker.heightAnchor.constraint(equalToConstant: 44),
+            picker.topAnchor.constraint(equalTo: startButton.topAnchor),
+            picker.bottomAnchor.constraint(equalTo: startButton.bottomAnchor),
+            picker.leadingAnchor.constraint(equalTo: startButton.leadingAnchor),
+            picker.trailingAnchor.constraint(equalTo: startButton.trailingAnchor),
         ])
 
         let tap = UITapGestureRecognizer(target: self, action: #selector(dismissKeyboard))

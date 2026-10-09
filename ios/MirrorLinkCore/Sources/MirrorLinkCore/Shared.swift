@@ -82,21 +82,23 @@ public enum SharedStore {
     public static let maxRequestAge: TimeInterval = 10 * 60
 
     /// "group.<app bundle id>". The extension's own id is "<app bundle id>.broadcast", so both sides
-    /// arrive at the same group name without it being written down twice.
+    /// arrive at the same group name without it being written down twice. A re-signing tool may add its own
+    /// ending to both ids, so ".broadcast" is taken out wherever it sits.
     public static func groupIdentifier(forBundleIdentifier id: String?) -> String {
         var base = id ?? "com.mohrefaey.mirrorlink"
-        let suffix = ".broadcast"
-        if base.hasSuffix(suffix) { base.removeLast(suffix.count) }
+        if let range = base.range(of: ".broadcast") { base.removeSubrange(range) }
         return "group." + base
     }
 
     private static let configKey = "mirrorlink.config"
     private static let statusKey = "mirrorlink.status"
 
-    public static func save(_ config: BroadcastConfig, suite: String) -> Bool {
+    /// `resetStatus`: a new request starts a clean slate; a mere refresh of an unused one must not erase what a
+    /// running broadcast has reported.
+    public static func save(_ config: BroadcastConfig, suite: String, resetStatus: Bool = true) -> Bool {
         guard let defaults = UserDefaults(suiteName: suite), let data = try? JSONEncoder().encode(config) else { return false }
         defaults.set(data, forKey: configKey)
-        defaults.removeObject(forKey: statusKey)
+        if resetStatus { defaults.removeObject(forKey: statusKey) }
         return true
     }
 

@@ -6,11 +6,15 @@ import ReplayKit
 final class SampleHandler: RPBroadcastSampleHandler, SenderSessionListener {
     private var session: SenderSession?
     private var peer: WebRTCPeer?
-    private let suite = SharedStore.groupIdentifier(forBundleIdentifier: Bundle.main.bundleIdentifier)
+    private lazy var suite: String? = AppIdentity.sharedSuite()
 
     override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
+        guard let suite = suite else {
+            finish("MirrorLink could not share settings with its broadcast part.\n" + AppIdentity.describe())
+            return
+        }
         guard let config = SharedStore.load(suite: suite) else {
-            finish("Open MirrorLink, enter the code, then tap Start mirroring.")
+            finish("Open MirrorLink, type the code, then tap Start mirroring.")
             return
         }
         SharedStore.clearConfig(suite: suite) // a code is good for one attempt
@@ -72,6 +76,7 @@ final class SampleHandler: RPBroadcastSampleHandler, SenderSessionListener {
     // MARK: - helpers
 
     private func report(_ phase: BroadcastStatus.Phase, _ message: String?, problem: Bool = false) {
+        guard let suite = suite else { return }
         let status = BroadcastStatus(phase: phase, message: message, isProblem: problem, updatedAt: Date().timeIntervalSince1970)
         SharedStore.write(status, suite: suite)
         DarwinNotifier.post(DarwinNotifier.statusChanged)

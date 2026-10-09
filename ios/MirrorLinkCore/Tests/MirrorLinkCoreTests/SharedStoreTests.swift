@@ -12,6 +12,7 @@ final class SharedStoreTests: XCTestCase {
     func testTheAppAndItsExtensionArriveAtTheSameGroup() {
         XCTAssertEqual(SharedStore.groupIdentifier(forBundleIdentifier: "com.example.mirror"), "group.com.example.mirror")
         XCTAssertEqual(SharedStore.groupIdentifier(forBundleIdentifier: "com.example.mirror.broadcast"), "group.com.example.mirror")
+        XCTAssertEqual(SharedStore.groupIdentifier(forBundleIdentifier: "com.example.mirror.broadcast.AB12CD"), "group.com.example.mirror.AB12CD")
         XCTAssertEqual(SharedStore.groupIdentifier(forBundleIdentifier: nil), "group.com.mohrefaey.mirrorlink")
     }
 
@@ -36,6 +37,14 @@ final class SharedStoreTests: XCTestCase {
         let config = BroadcastConfig(server: "https://m.example.com", code: "123456", deviceName: "iPad", quality: .saver, requestedAt: 10)
         XCTAssertTrue(SharedStore.save(config, suite: suite))
         XCTAssertNil(SharedStore.readStatus(suite: suite))
+    }
+
+    func testRefreshingARequestKeepsTheReportedStatus() {
+        let status = BroadcastStatus(phase: .live, updatedAt: 5)
+        SharedStore.write(status, suite: suite)
+        let config = BroadcastConfig(server: "https://m.example.com", code: "123456", deviceName: "iPad", quality: .balanced, requestedAt: 10)
+        XCTAssertTrue(SharedStore.save(config, suite: suite, resetStatus: false))
+        XCTAssertEqual(SharedStore.readStatus(suite: suite), status)
     }
 
     func testQualityKeysAndFallback() {

@@ -1,0 +1,63 @@
+import Foundation
+import MirrorLinkCore
+
+/// Who this copy of the app really is. A re-signing tool (Sideloadly, AltStore) may change bundle identifiers and
+/// App Group names when it signs the app, so nothing here assumes the names written in project.yml: it asks the
+/// installed copy instead.
+enum AppIdentity {
+    static var isExtensionProcess: Bool { Bundle.main.bundleURL.pathExtension == "appex" }
+
+    /// The app bundle, whether we are running in the app or inside its broadcast extension.
+    static var appBundleURL: URL {
+        let own = Bundle.main.bundleURL
+        return isExtensionProcess ? own.deletingLastPathComponent().deletingLastPathComponent() : own
+    }
+
+    /// Bundle identifier of the installed broadcast extension, as signed on this device.
+    static func broadcastExtensionID() -> String? {
+        let plugins = appBundleURL.appendingPathComponent("PlugIns")
+        guard let urls = try? FileManager.default.contentsOfDirectory(at: plugins, includingPropertiesForKeys: nil) else { return nil }
+        for url in urls where url.pathExtension == "appex" {
+            guard let bundle = Bundle(url: url), let id = bundle.bundleIdentifier else { continue }
+            let extensionInfo = bundle.object(forInfoDictionaryKey: "NSExtension") as? [String: Any]
+            if extensionInfo?["NSExtensionPointIdentifier"] as? String == "com.apple.broadcast-services-upload" { return id }
+        }
+        return nil
+    }
+
+    /// The App Groups this bundle was signed for, read from its embedded provisioning profile.
+    static func appGroups(inBundleAt url: URL) -> [String] {
+        guard let data = try? Data(contentsOf: url.appendingPathComponent("embedded.mobileprovision")),
+              let start = data.range(of: Data("<?xml".utf8)),
+              let end = data.range(of: Data("</plist>".utf8)),
+              start.lowerBound < end.upperBound,
+              let plist = try? PropertyListSerialization.propertyList(from: data.subdata(in: start.lowerBound..<end.upperBound), format: nil) as? [String: Any],
+              let entitlements = plist["Entitlements"] as? [String: Any],
+              let groups = entitlements["com.apple.security.application-groups"] as? [String]
+        else { return [] }
+        return groups
+    }
+
+    /// The App Group both the app and its extension can really open on this device, or nil if there is none.
+    static func sharedSuite() -> String? {
+        var candidates = appGroups(inBundleAt: appBundleURL).sorted()
+        candidates += appGroups(inBundleAt: Bundle.main.bundleURL).sorted()
+        candidates.append(SharedStore.groupIdentifier(forBundleIdentifier: Bundle.main.bundleIdentifier)) // an Xcode build
+        var seen = Set<String>()
+        for name in candidates where seen.insert(name).inserted {
+            if FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: name) != nil { return name }
+        }
+        return nil
+    }
+
+    /// A few plain lines for the screen, so a failed first run says what is wrong.
+    static func describe() -> String {
+        let signed = appGroups(inBundleAt: Bundle.main.bundleURL)
+        return [
+            "app id: \(Bundle.main.bundleIdentifier ?? "?")",
+            "broadcast part: \(isExtensionProcess ? "(this is it)" : (broadcastExtensionID() ?? "NOT FOUND"))",
+            "shared storage: \(sharedSuite() ?? "NONE")",
+            "signed groups: \(signed.isEmpty ? "none" : signed.joined(separator: ", "))",
+        ].joined(separator: "\n")
+    }
+}
