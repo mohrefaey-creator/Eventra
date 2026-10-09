@@ -34,10 +34,10 @@ Both devices need a network path to each other: the same Wi-Fi, or the internet 
 | | |
 |---|---|
 | **Bluetooth** | **Not used, and it can't be.** Bluetooth bandwidth is far too low for live screen video, and browsers can't act as a Bluetooth peripheral or use it as a media transport (Web Bluetooth is Chromium-only, absent on iOS Safari, and is a central/GATT client only). MirrorLink uses Wi-Fi/IP instead. |
-| **Receiver** (shows the mirror) | Any modern browser: laptop, desktop, smart-TV browser, tablet. |
+| **Receiver** (shows the mirror) | Any modern browser: laptop, desktop, tablet, or a TV's browser. On a TV open `/tv` (big print, works with a remote control, and falls back for older browsers); open `/check` on any screen to see whether its browser can be a receiver. |
 | **Sender: desktop browsers** | Chrome, Edge, Firefox, Safari on Mac/Windows/Linux. Works today. |
 | **Sender: Android phones and tablets** | **The Android app in [`android/`](android/README.md)** (Samsung, Honor, any Android 8+). A web page cannot capture a phone's screen, so the app does it and uses the same pairing and receiver. On a phone, the sender page offers an **Open in the MirrorLink app** button. |
-| **Sender: iPhone / iPad** | **Not built yet.** It needs a native app too (an iOS ReplayKit Broadcast Upload Extension) and cannot be built or tested on Linux. [`docs/PROTOCOL.md`](docs/PROTOCOL.md) is the spec it will follow. Until then use the built-in AirPlay. |
+| **Sender: iPhone / iPad** | **The iOS app in [`ios/`](ios/README.md)**, built on a Mac in GitHub's cloud and installed from a Windows laptop or a Mac with your own Apple ID (no App Store). It compiles and its pairing logic is tested; it has not been run on a real device yet. A web page cannot capture an iPhone's screen. |
 | **Sender: phone/tablet browsers** | Not possible: `getDisplayMedia` is unavailable in iOS Safari and Chrome for Android. The sender page detects this and points to the app. |
 
 ## Configuration (environment variables)

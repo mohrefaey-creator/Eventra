@@ -32,14 +32,16 @@ Developer account ($99/year) makes it last a year.
 
 ### 1. Get the .ipa (no Mac needed)
 
-The workflow `.github/workflows/ios.yml` builds it on a Mac in GitHub's cloud:
+The workflow `.github/workflows/ios.yml` builds it on a Mac in GitHub's cloud, every time something under
+`ios/` is pushed:
 
-1. Put this repository on GitHub (the `ios/` folder and `.github/` are what matter).
-2. Open the **Actions** tab, pick **iOS app**, run it (or push a change under `ios/`).
-3. When it finishes, open the run and download **MirrorLink-unsigned-ipa** (a zip with `MirrorLink.ipa`).
+1. Open the repository's **Actions** tab and pick the latest green run of **iOS app**.
+2. At the bottom of the run, download **MirrorLink-unsigned-ipa** (a zip that contains `MirrorLink.ipa`).
+3. To bake in a different starting server address, choose **Run workflow** and fill in *server*.
 
 The .ipa is unsigned on purpose: you sign it yourself in step 2, so nothing secret is stored in GitHub.
-(For a private repository GitHub's free allowance is small for Mac builds; a build takes about 10 minutes.)
+A build takes about five minutes. The .ipa is about 6 MB, most of it the WebRTC library, which the build checks
+is really inside the app (the broadcast extension cannot start without it).
 
 ### 2a. Install from a Windows laptop (Sideloadly)
 
