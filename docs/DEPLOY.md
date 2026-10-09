@@ -51,6 +51,20 @@ see `relay` candidates appear.
 Set `ANDROID_APP_URL` (where people download the app) and `ANDROID_CERT_SHA256` (the fingerprint of the key the
 APK is signed with) in `.env`, then `docker compose up -d` again. See [`android/README.md`](../android/README.md).
 
+## Using Vercel
+
+Vercel is good for the **domain**, not for running this server as it stands.
+
+- Vercel Functions can now accept WebSocket connections (its docs mark the API experimental), so hosting is possible
+  in principle. But MirrorLink keeps pairing rooms in one process's memory. On a platform that may run several instances
+  at once, the receiver's connection and the sender's can land on different instances and never find each other.
+  Making that work means a shared store plus cross-instance messaging, which is a rewrite of the signaling, and the Android
+  app would need to follow. Connection time limits on Vercel were also not checked.
+- Easy and reliable instead: run the container above on any always-on host, and use Vercel only for DNS. Register or
+  add the domain in Vercel, then in its DNS settings add an `A` record (for example `mirror`) pointing at the server's
+  IP address. Caddy fetches the certificate by itself.
+- The free `*.vercel.app` address only exists for projects deployed on Vercel, so it cannot point at your own server.
+
 ## Running it without Docker
 
 ```bash

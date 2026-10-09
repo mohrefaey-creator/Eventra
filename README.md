@@ -63,7 +63,10 @@ and regenerated when your LAN addresses change.
 **Hosting it publicly:** see [`docs/DEPLOY.md`](docs/DEPLOY.md): a `Dockerfile` and a Docker Compose setup with automatic
 HTTPS (Caddy) and an optional TURN relay. In short: run behind a reverse proxy that terminates TLS and forwards WebSockets
 (`/ws`), set `TLS=off`, `PUBLIC_URL`, `TRUST_PROXY=1`, and provide a TURN server. Serverless platforms that can't hold
-WebSockets open (for example Vercel functions) are not suitable for this server.
+WebSockets open are not suitable. Vercel Functions can now hold WebSocket connections (Vercel documents the API as
+experimental), but this server keeps its pairing rooms in one process's memory: on a platform that runs several
+instances at once, a receiver and a sender can land on different instances and never meet. Run it as one always-on
+container instead; Vercel is fine for the domain name (see "Using Vercel" in docs/DEPLOY.md).
 
 ## Security model
 
