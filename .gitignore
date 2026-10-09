@@ -2,3 +2,11 @@ node_modules/
 .certs/
 *.log
 .DS_Store
+
+# Android / Gradle
+android/.gradle/
+android/build/
+android/*/build/
+android/local.properties
+*.keystore
+*.jks
