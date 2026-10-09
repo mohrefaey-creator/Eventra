@@ -24,6 +24,7 @@ final class MainViewController: UIViewController, UITextFieldDelegate {
     private let statusLabel = UILabel()
     private let diagnosticsLabel = UILabel()
     private let formBlock = UIStackView()
+    private let alternativeButton = UIButton(type: .system)
     private let subtitleLabel = UILabel()
     private let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 200, height: 54))
 
@@ -48,6 +49,12 @@ final class MainViewController: UIViewController, UITextFieldDelegate {
         showServer()
         reflectBroadcast()
         NotificationCenter.default.addObserver(self, selector: #selector(captureChanged), name: UIScreen.capturedDidChangeNotification, object: nil)
+        NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { _ in
+            Diag.log("app went inactive (a system box probably opened)")
+        }
+        NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
+            Diag.log("app active again, screen captured: \(UIScreen.main.isCaptured)")
+        }
         NotificationCenter.default.addObserver(self, selector: #selector(captureChanged), name: UIApplication.didBecomeActiveNotification, object: nil)
         statusToken = DarwinNotifier.observe(DarwinNotifier.statusChanged) { [weak self] in self?.reflectBroadcast() }
         LocalNetworkPermission.requestOnce()
@@ -162,6 +169,13 @@ final class MainViewController: UIViewController, UITextFieldDelegate {
         present(alert, animated: true)
     }
 
+    /// Presses Apple's own button from code. The first version did this and it worked, so it is the fallback.
+    @objc private func openBoxFromCode() {
+        view.endEditing(true)
+        Diag.log("fallback button pressed")
+        picker.subviews.compactMap { $0 as? UIButton }.first?.sendActions(for: .touchUpInside)
+    }
+
     @objc private func qualityChanged() {
         quality = Quality.allCases[qualityControl.selectedSegmentIndex]
         defaults.set(quality.rawValue, forKey: "quality")
@@ -176,7 +190,10 @@ final class MainViewController: UIViewController, UITextFieldDelegate {
 
     @objc private func nameEdited() { syncForm() }
 
-    @objc private func captureChanged() { reflectBroadcast() }
+    @objc private func captureChanged() {
+        Diag.log("screen capture state: \(UIScreen.main.isCaptured)")
+        reflectBroadcast()
+    }
 
     @objc private func dismissKeyboard() { view.endEditing(true) }
 
@@ -290,6 +307,10 @@ final class MainViewController: UIViewController, UITextFieldDelegate {
         diagnosticsLabel.font = .monospacedSystemFont(ofSize: 11, weight: .regular)
         diagnosticsLabel.textColor = .tertiaryLabel
         diagnosticsLabel.numberOfLines = 0
+        diagnosticsLabel.lineBreakMode = .byCharWrapping // the ids have no spaces to break at
+        for label in [diagnosticsLabel, statusLabel, subtitle] {
+            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        }
         diagnosticsLabel.text = AppIdentity.describe()
 
         stack.axis = .vertical
@@ -301,7 +322,10 @@ final class MainViewController: UIViewController, UITextFieldDelegate {
         for item in [serverRow, field("Pairing code", codeField), field("This device's name", nameField), field("Quality", qualityControl)] as [UIView] {
             formBlock.addArrangedSubview(item)
         }
-        for item in [title, subtitle, formBlock, startButton, statusLabel, diagnosticsLabel] as [UIView] {
+        alternativeButton.setTitle("Nothing opened? Tap here instead", for: .normal)
+        alternativeButton.titleLabel?.font = .preferredFont(forTextStyle: .footnote)
+        alternativeButton.addTarget(self, action: #selector(openBoxFromCode), for: .touchUpInside)
+        for item in [title, subtitle, formBlock, startButton, alternativeButton, statusLabel, diagnosticsLabel] as [UIView] {
             stack.addArrangedSubview(item)
         }
 
@@ -311,7 +335,7 @@ final class MainViewController: UIViewController, UITextFieldDelegate {
         stack.translatesAutoresizingMaskIntoConstraints = false
         let widest = stack.widthAnchor.constraint(lessThanOrEqualToConstant: 560)
         let full = stack.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor)
-        full.priority = .defaultHigh
+        full.priority = UILayoutPriority(999) // stronger than any label's wish to be wide
         NSLayoutConstraint.activate([
             scroll.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor),
