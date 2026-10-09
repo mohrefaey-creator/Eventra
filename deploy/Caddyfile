@@ -1,0 +1,5 @@
+# Caddy gets and renews the HTTPS certificate by itself and passes WebSocket upgrades (/ws) through.
+{$DOMAIN} {
+	encode zstd gzip
+	reverse_proxy mirrorlink:3000
+}

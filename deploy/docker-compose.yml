@@ -1,0 +1,67 @@
+# MirrorLink on one small server: the app, Caddy (automatic HTTPS) and, optionally, a TURN relay.
+#
+#   cp .env.example .env     # fill in DOMAIN and the rest
+#   docker compose up -d                       # app + HTTPS
+#   docker compose --profile turn up -d        # ...plus the TURN relay
+#
+# See docs/DEPLOY.md for DNS, firewall ports and testing.
+
+services:
+  mirrorlink:
+    build: ..
+    restart: unless-stopped
+    environment:
+      PUBLIC_URL: https://${DOMAIN:?set DOMAIN in .env}
+      TRUST_PROXY: "1" # Caddy is the only thing that can reach this container
+      ANDROID_APP_URL: ${ANDROID_APP_URL:-}
+      IOS_APP_URL: ${IOS_APP_URL:-}
+      ANDROID_PACKAGE: ${ANDROID_PACKAGE:-app.mirrorlink}
+      ANDROID_CERT_SHA256: ${ANDROID_CERT_SHA256:-}
+      TURN_URLS: ${TURN_URLS:-}
+      TURN_SECRET: ${TURN_SECRET:-}
+    expose:
+      - "3000"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - mirrorlink
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+  # Relays video between devices that cannot reach each other directly (different networks,
+  # strict firewalls). Credentials are short-lived and derived from TURN_SECRET.
+  coturn:
+    profiles: ["turn"]
+    image: coturn/coturn:latest
+    restart: unless-stopped
+    network_mode: host # a relay needs its own public ports
+    command:
+      - "-n"
+      - "--realm=${DOMAIN}"
+      - "--use-auth-secret"
+      - "--static-auth-secret=${TURN_SECRET:?set TURN_SECRET in .env}"
+      - "--listening-port=3478"
+      - "--min-port=49160"
+      - "--max-port=49300"
+      - "--external-ip=${PUBLIC_IP:?set PUBLIC_IP in .env}"
+      - "--fingerprint"
+      - "--no-cli"
+      - "--no-multicast-peers"
+      - "--denied-peer-ip=10.0.0.0-10.255.255.255"
+      - "--denied-peer-ip=172.16.0.0-172.31.255.255"
+      - "--denied-peer-ip=192.168.0.0-192.168.255.255"
+      - "--user-quota=12"
+      - "--total-quota=100"
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -1,5 +1,6 @@
 // MirrorLink server: static files, a tiny JSON API, and the pairing/signaling WebSocket.
 // Video never passes through here - it flows peer-to-peer between the two browsers.
+import { createHmac, randomBytes } from 'node:crypto';
 import { createServer as createHttpServer } from 'node:http';
 import { createServer as createHttpsServer } from 'node:https';
 import { readFile } from 'node:fs/promises';
@@ -53,6 +54,18 @@ export function normalizeFingerprint(raw) {
   return hex.length === 64 ? hex.match(/../g).join(':') : null;
 }
 
+/**
+ * Short-lived TURN credentials in the format coturn's `use-auth-secret` mode expects
+ * (https://datatracker.ietf.org/doc/html/draft-uberti-behave-turn-rest-00): username = expiry:label,
+ * credential = base64(HMAC-SHA1(secret, username)). Nothing is stored, and a leaked credential
+ * stops working after `ttlSeconds`, unlike a fixed password published to every visitor.
+ */
+export function turnCredentials(secret, ttlSeconds = 3600, now = Date.now()) {
+  const username = `${Math.floor(now / 1000) + ttlSeconds}:${randomBytes(4).toString('hex')}`;
+  const credential = createHmac('sha1', secret).update(username).digest('base64');
+  return { username, credential };
+}
+
 const isLoopbackHost = (host) => /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(host ?? '');
 
 /**
@@ -70,6 +83,9 @@ export async function startServer(options = {}) {
     trustProxy = false,
     // Native sender apps: where to get them, and which Android signing certificates may claim
     // https://<this server>/send links (Android App Links), so a scanned QR opens the app directly.
+    // TURN relay for devices on different networks: { urls: [...], secret, ttlSeconds? }.
+    // Credentials are minted per request from the shared secret, so none is ever stored or reused.
+    turn = null,
     appLinks = {},
     androidPackage = 'app.mirrorlink',
     androidCertSha256 = [],
@@ -103,12 +119,20 @@ export async function startServer(options = {}) {
       return;
     }
 
+    if (url.pathname === '/healthz') {
+      res.writeHead(200, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' }).end('ok');
+      return;
+    }
+
     if (url.pathname === '/api/info') {
       const origins = senderOrigins(req);
       res.writeHead(200, { 'Content-Type': MIME['.json'], 'Cache-Control': 'no-store' });
+      const relay = turn?.secret && turn.urls?.length
+        ? [{ urls: turn.urls, ...turnCredentials(turn.secret, turn.ttlSeconds) }]
+        : [];
       res.end(
         JSON.stringify({
-          iceServers,
+          iceServers: [...iceServers, ...relay],
           senderOrigins: origins,
           secureSenderAvailable: origins.some((o) => o.startsWith('https:')),
           appLinks: { android: appLinks.android || '', ios: appLinks.ios || '' },
@@ -290,6 +314,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     tls: env.TLS !== 'off',
     publicUrl: env.PUBLIC_URL || '',
     trustProxy: env.TRUST_PROXY === '1',
+    turn: env.TURN_URLS && env.TURN_SECRET
+      ? {
+          urls: env.TURN_URLS.split(',').map((u) => u.trim()).filter(Boolean),
+          secret: env.TURN_SECRET,
+          ttlSeconds: Number(env.TURN_TTL) || 3600,
+        }
+      : null,
     appLinks: { android: env.ANDROID_APP_URL || '', ios: env.IOS_APP_URL || '' },
     androidPackage: env.ANDROID_PACKAGE || 'app.mirrorlink',
     androidCertSha256: (env.ANDROID_CERT_SHA256 || '').split(',').filter((v) => v.trim()),

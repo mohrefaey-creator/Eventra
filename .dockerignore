@@ -1,0 +1,9 @@
+.git
+.certs
+node_modules
+android
+test
+docs
+deploy
+*.md
+*.zip

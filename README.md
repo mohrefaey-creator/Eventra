@@ -50,6 +50,7 @@ Both devices need a network path to each other: the same Wi-Fi, or the internet 
 | `TLS` | on | `TLS=off` disables the HTTPS listener (do this behind a TLS-terminating proxy) |
 | `PUBLIC_URL` | – | Public HTTPS origin senders should use, e.g. `https://mirror.example.com` |
 | `ICE_SERVERS` | Google STUN | JSON array of STUN/TURN servers. Add a **TURN** server for devices on different networks / strict firewalls |
+| `TURN_URLS` + `TURN_SECRET` | – | Your own coturn relay (`use-auth-secret` mode). The server issues each client a fresh credential that expires after `TURN_TTL` seconds (default 3600), so no password is ever published |
 | `TRUST_PROXY` | off | `1` to use `X-Forwarded-For` for rate limiting (only behind a proxy you control) |
 | `ANDROID_APP_URL` / `IOS_APP_URL` | – | Where to get the sender app; the sender page shows a **Get the app** link on phones |
 | `ANDROID_CERT_SHA256` | – | SHA-256 fingerprint(s) of the Android app's signing key (comma-separated). Publishes `/.well-known/assetlinks.json` so a scanned QR opens the app directly |
@@ -59,9 +60,10 @@ Both devices need a network path to each other: the same Wi-Fi, or the internet 
 `http://192.168.x.x` does not, so senders on the LAN must use the HTTPS port. The certificate is cached in `.certs/`
 and regenerated when your LAN addresses change.
 
-**Hosting it publicly:** run behind a reverse proxy that terminates TLS and forwards WebSockets (`/ws`), set
-`TLS=off`, `PUBLIC_URL`, `TRUST_PROXY=1`, and provide a TURN server. Serverless platforms that can't hold WebSockets
-open (for example Vercel functions) are not suitable for this server.
+**Hosting it publicly:** see [`docs/DEPLOY.md`](docs/DEPLOY.md): a `Dockerfile` and a Docker Compose setup with automatic
+HTTPS (Caddy) and an optional TURN relay. In short: run behind a reverse proxy that terminates TLS and forwards WebSockets
+(`/ws`), set `TLS=off`, `PUBLIC_URL`, `TRUST_PROXY=1`, and provide a TURN server. Serverless platforms that can't hold
+WebSockets open (for example Vercel functions) are not suitable for this server.
 
 ## Security model
 
@@ -85,7 +87,7 @@ open (for example Vercel functions) are not suitable for this server.
 ## Development
 
 ```bash
-npm test            # 27 unit + integration tests (pairing logic, server, security checks, app links)
+npm test            # 30 unit + integration tests (pairing logic, server, security checks, app links, TURN)
 npm run test:e2e    # real browsers: pairing + WebRTC video through the real server (needs Chromium)
 cd android && ./gradlew -PcoreOnly :core:test   # 24 tests for the Android pairing core, incl. against the real server
 ```
@@ -98,6 +100,7 @@ server/index.js      HTTP + HTTPS + static files + /ws upgrade
 server/signaling.js  pairing codes, approval, signal relay (no I/O: unit-testable)
 server/tls.js        self-signed certificate cache
 android/             Android sender app (see android/README.md)
+Dockerfile, deploy/  container image and a Compose setup with HTTPS and TURN (see docs/DEPLOY.md)
 public/              receiver, sender and landing pages (plain ES modules, no build step)
 docs/PROTOCOL.md     wire protocol for writing a native sender
 test/                node:test suite + Playwright e2e

@@ -3,7 +3,8 @@ import { EventEmitter, once } from 'node:events';
 import { request } from 'node:http';
 import { after, describe, it } from 'node:test';
 import { WebSocket } from 'ws';
-import { normalizeFingerprint, startServer } from '../server/index.js';
+import { createHmac } from 'node:crypto';
+import { normalizeFingerprint, startServer, turnCredentials } from '../server/index.js';
 import { createSignaling } from '../server/signaling.js';
 
 // ---------------------------------------------------------------- unit: logic
@@ -396,6 +397,59 @@ describe('native app support', async () => {
       ]);
       const info = await (await fetch(`http://127.0.0.1:${server.httpPort}/api/info`)).json();
       assert.deepEqual(info.appLinks, { android: 'https://example.test/app.apk', ios: 'https://apps.apple.com/app/id1' });
+    } finally {
+      await server.close();
+    }
+  });
+});
+
+// ------------------------------------------------------------ hosting support
+
+describe('hosting support', async () => {
+  it('derives TURN credentials the way coturn verifies them', () => {
+    const now = Date.UTC(2026, 9, 9, 12, 0, 0);
+    const { username, credential } = turnCredentials('s3cret', 3600, now);
+    const [expiry, label] = username.split(':');
+    assert.equal(Number(expiry), Math.floor(now / 1000) + 3600);
+    assert.match(label, /^[0-9a-f]{8}$/);
+    assert.equal(credential, createHmac('sha1', 's3cret').update(username).digest('base64'));
+    assert.notEqual(turnCredentials('s3cret', 3600, now).username, username, 'each call gets its own username');
+  });
+
+  it('adds fresh TURN credentials to /api/info only when configured', async () => {
+    const plain = await startServer({ port: 0, tls: false, quiet: true, host: '127.0.0.1' });
+    const relay = await startServer({
+      port: 0,
+      tls: false,
+      quiet: true,
+      host: '127.0.0.1',
+      turn: { urls: ['turn:turn.example.test:3478', 'turns:turn.example.test:5349'], secret: 'k', ttlSeconds: 600 },
+    });
+    try {
+      const before = await (await fetch(`http://127.0.0.1:${plain.httpPort}/api/info`)).json();
+      assert.ok(before.iceServers.every((s) => !s.credential), 'no TURN entry unless configured');
+
+      const a = await (await fetch(`http://127.0.0.1:${relay.httpPort}/api/info`)).json();
+      const b = await (await fetch(`http://127.0.0.1:${relay.httpPort}/api/info`)).json();
+      const turnA = a.iceServers.find((s) => s.credential);
+      const turnB = b.iceServers.find((s) => s.credential);
+      assert.deepEqual(turnA.urls, ['turn:turn.example.test:3478', 'turns:turn.example.test:5349']);
+      assert.equal(turnA.credential, createHmac('sha1', 'k').update(turnA.username).digest('base64'));
+      assert.ok(Number(turnA.username.split(':')[0]) <= Math.floor(Date.now() / 1000) + 600);
+      assert.notEqual(turnA.username, turnB.username);
+      assert.ok(a.iceServers.length > 1, 'public STUN is still offered next to the relay');
+    } finally {
+      await plain.close();
+      await relay.close();
+    }
+  });
+
+  it('answers health checks', async () => {
+    const server = await startServer({ port: 0, tls: false, quiet: true, host: '127.0.0.1' });
+    try {
+      const res = await fetch(`http://127.0.0.1:${server.httpPort}/healthz`);
+      assert.equal(res.status, 200);
+      assert.equal(await res.text(), 'ok');
     } finally {
       await server.close();
     }
