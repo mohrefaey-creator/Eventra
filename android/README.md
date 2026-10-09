@@ -97,3 +97,10 @@ v0.1.1 `WebRtcPeer` asks for a fresh frame as soon as the connection is up and a
 while the screen is still (it re-attaches the capture surface, which libwebrtc 150 does with
 `VirtualDisplay.resize`/`setSurface`, so it is safe on Android 14+). The receiver page now also says
 "Connected, waiting for the first picture" instead of staying on "Connecting".
+
+## Receiver page: the video must be visible to start
+
+Chrome will not autoplay a video that is hidden. The receiver used to keep the video hidden until it
+started playing, so on a real Chrome the picture never appeared even though frames were arriving. The
+page now shows the stage and calls `play()` as soon as the video track arrives. `test/e2e.mjs` no longer
+launches Chromium with `--autoplay-policy=no-user-gesture-required`, which had been hiding this.

@@ -155,12 +155,17 @@ function startPeer(peer) {
   };
   pc.ontrack = (e) => {
     els.video.srcObject = e.streams[0] ?? new MediaStream([e.track]);
+    // Browsers will not start a video that is hidden, so put the stage on screen first and play explicitly.
+    revealStage();
+    showOverlay('Waiting for the first picture…');
+    els.video.play().catch(() => {});
   };
   pc.onconnectionstatechange = () => {
     if (pc !== mine) return;
     const state = mine.connectionState;
     if (state === 'connected') {
-      els.overlay.hidden = true;
+      if (pictureShowing()) els.overlay.hidden = true;
+      else if (!els.stage.hidden) showOverlay('Connected. Waiting for the first picture…');
     } else if (state === 'disconnected') {
       showOverlay('Connection interrupted - trying to recover…');
     } else if (state === 'failed') {
@@ -181,7 +186,7 @@ function watchFirstPicture(mine, name) {
   clearInterval(waitTimer);
   let connectedFor = 0;
   waitTimer = setInterval(async () => {
-    if (pc !== mine || !els.stage.hidden) {
+    if (pc !== mine || pictureShowing()) {
       clearInterval(waitTimer);
       return;
     }
@@ -204,11 +209,11 @@ function watchFirstPicture(mine, name) {
     connectedFor += 1.5;
     const kb = `${Math.round(bytes / 1024)} KB received`;
     const hint = connectedFor > 6 ? " If nothing appears, touch the other device's screen." : '';
-    setStatus(
-      decoded
-        ? `Connected to ${name}. Starting the picture…`
-        : `Connected to ${name}. Waiting for the first picture… (${kb}).${hint}`,
-    );
+    const text = decoded
+      ? `Connected to ${name}. Starting the picture…`
+      : `Connected to ${name}. Waiting for the first picture… (${kb}).${hint}`;
+    setStatus(text);
+    if (!els.stage.hidden) showOverlay(text);
   }, 1500);
 }
 
@@ -227,10 +232,17 @@ async function handleSignal(data) {
 
 els.video.addEventListener('playing', showStage);
 
-function showStage() {
+const pictureShowing = () => !els.video.paused && els.video.readyState >= 3 && els.video.videoWidth > 0;
+
+function revealStage() {
   els.pairing.hidden = true;
   els.stage.hidden = false;
   document.title = `Mirroring ${els.who.textContent} - MirrorLink`;
+}
+
+function showStage() {
+  revealStage();
+  els.overlay.hidden = true;
   startStats();
   requestWakeLock();
   wakeToolbar();
@@ -308,6 +320,7 @@ els.fullscreen.addEventListener('click', toggleFullscreen);
 els.video.addEventListener('dblclick', toggleFullscreen);
 
 async function requestWakeLock() {
+  if (wakeLock) return;
   try {
     wakeLock = await navigator.wakeLock?.request('screen');
   } catch {

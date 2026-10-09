@@ -28,7 +28,7 @@ const server = await startServer({
 });
 const browser = await chromium.launch({
   executablePath: findChromium(),
-  args: ['--disable-features=WebRtcHideLocalIpsWithMdns', '--autoplay-policy=no-user-gesture-required'],
+  args: ['--disable-features=WebRtcHideLocalIpsWithMdns'],
 });
 
 let failed = false;
