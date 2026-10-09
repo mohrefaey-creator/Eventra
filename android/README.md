@@ -14,11 +14,11 @@ No Google Play Services are used, so it also works on Honor and other devices wi
 
 | | |
 |---|---|
-| **Verified here** | The pairing logic (`core/`, 24 tests, 9 of them running the real Node server). The app's Kotlin type-checks against the real Android 16 framework and WebRTC 150. Every resource the manifest and code reference exists. |
-| **Not verified** | Building the APK with the Android Gradle Plugin, installing it, screen capture, video on a real device, Android App Links verification, behaviour on Android 14 to 16 foreground-service rules, Honor and Samsung specifics. The first run on a real device is the real test. |
+| **Verified** | A real Gradle build (AGP 8.11, Kotlin 2.2, JDK 17) produces a signed debug APK (21 MB, arm64-v8a + armeabi-v7a, Android 8.0 to 16). 43 unit tests pass: 25 for the pairing core (9 run the real Node server) and 18 Robolectric tests that drive the real screens and service (form, code formatting, deep links, the notification, capture-consent and service flow, Stop button, failure paths). Android Lint reports no errors. The APK's manifest, permissions and signature were inspected with `aapt2` and `apksigner`. |
+| **Not verified** | Anything that needs a physical device: installing, the system screen-capture prompt, actual video reaching the receiver, App Links verification, foreground-service behaviour on Android 14 to 16, Honor and Samsung specifics. Release builds (`assembleRelease`) and the x86 emulator (the build ships ARM libraries only) were not exercised. The first run on a real device is the real test. |
 
-The cloud environment this was written in cannot reach the Android SDK or Google's Maven repository,
-so a real build was not possible there. Expect to fix small things on the first build.
+Where the build ran: a Linux microVM with the Android SDK, because the machine this was written on cannot
+reach Google's Maven repository. The recipe is the same as the one below; nothing in it is special.
 
 ## Build it
 
@@ -86,4 +86,5 @@ Sound (Android needs a separate playback-capture permission and API 29+), scanni
 core/   Pure Kotlin: link parsing, protocol messages, SenderSession state machine. Runs on any JDK:
         ./gradlew -PcoreOnly :core:test      (needs `node` on the PATH for the integration tests)
 app/    The Android app: MainActivity (UI), MirrorService (foreground service), WebRtcPeer (capture + WebRTC)
+        ./gradlew :app:testDebugUnitTest    (Robolectric UI/service tests; first run downloads Android jars)
 ```

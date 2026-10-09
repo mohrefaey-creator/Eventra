@@ -43,10 +43,12 @@ class MirrorService : Service() {
         try {
             peer.beginCapture()
         } catch (e: Exception) {
-            peer.close()
-            MirrorState.publish(MirrorState.Value.Ended(SenderSession.EndReason.ERROR))
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+            failStart(peer)
+            return START_NOT_STICKY
+        } catch (e: LinkageError) {
+            // The native WebRTC library is missing or will not load on this device (for example an x86
+            // emulator, which this build does not include). End the session cleanly rather than crash.
+            failStart(peer)
             return START_NOT_STICKY
         }
         val newSession = SenderSession(request.server, request.code, request.deviceName, peer, listener)
@@ -69,6 +71,13 @@ class MirrorService : Service() {
             stopForeground(STOP_FOREGROUND_REMOVE)
             stopSelf()
         }
+    }
+
+    private fun failStart(peer: WebRtcPeer) {
+        peer.close()
+        MirrorState.publish(MirrorState.Value.Ended(SenderSession.EndReason.ERROR))
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
     }
 
     private fun startForegroundNow() {

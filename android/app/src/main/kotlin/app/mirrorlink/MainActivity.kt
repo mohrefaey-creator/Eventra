@@ -343,8 +343,9 @@ class MainActivity : Activity() {
         setPadding(0, 0, 0, dp(4))
     }
 
+    /** Lets screen readers jump between sections. The API only exists from Android 9; older versions skip it. */
     private fun TextView.accessibilityHeading() {
-        isAccessibilityHeading = true
+        if (Build.VERSION.SDK_INT >= 28) isAccessibilityHeading = true
     }
 
     private fun matchWidth(bottom: Int = 0) = LinearLayout.LayoutParams(
