@@ -1,0 +1,97 @@
+name: iOS app
+
+# Builds the iOS sender on a Mac in the cloud and produces an UNSIGNED MirrorLink.ipa.
+# You then sign it with your own Apple ID on your own computer (see ios/README.md), so no certificates
+# or passwords ever live in this repository.
+
+on:
+  push:
+    paths: ["ios/**", "server/**", ".github/workflows/ios.yml"]
+  pull_request:
+    paths: ["ios/**", "server/**", ".github/workflows/ios.yml"]
+  workflow_dispatch:
+    inputs:
+      server:
+        description: "Server address the app starts with, e.g. https://mirror.example.com (you can change it inside the app)"
+        required: false
+        default: ""
+
+env:
+  BUNDLE_ID: com.mohrefaey.mirrorlink
+  DEFAULT_SERVER: https://mirror.example.com
+
+jobs:
+  core:
+    name: Pairing core tests
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: swift test
+        working-directory: ios/MirrorLinkCore
+        run: swift test
+
+  app:
+    name: Build unsigned IPA
+    needs: core
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: brew install xcodegen ldid
+
+      - name: Generate the Xcode project
+        working-directory: ios
+        run: xcodegen generate
+
+      - name: Build for iPhone and iPad (no signing)
+        working-directory: ios
+        env:
+          SERVER: ${{ inputs.server || env.DEFAULT_SERVER }}
+        run: |
+          set -o pipefail
+          xcodebuild -project MirrorLink.xcodeproj -scheme MirrorLink \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            MIRRORLINK_BUNDLE_ID="$BUNDLE_ID" MIRRORLINK_SERVER="$SERVER" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            build | tee build.log
+
+      - name: Package the IPA
+        run: |
+          set -euo pipefail
+          APP=ios/build/Build/Products/Release-iphoneos/MirrorLink.app
+          EXT="$APP/PlugIns/MirrorLinkBroadcast.appex"
+          test -d "$APP" && test -d "$EXT"
+
+          # Stamp the App Group entitlement on both programs. A re-signing tool keeps these, which is what
+          # lets the app and its broadcast extension share the code you typed.
+          for name in MirrorLink MirrorLinkBroadcast; do
+            f=$(find ios -name "$name.entitlements" | head -1)
+            sed "s/\$(MIRRORLINK_BUNDLE_ID)/$BUNDLE_ID/g" "$f" > "/tmp/$name.entitlements"
+          done
+          ldid -S/tmp/MirrorLink.entitlements "$APP/MirrorLink"
+          ldid -S/tmp/MirrorLinkBroadcast.entitlements "$EXT/MirrorLinkBroadcast"
+
+          mkdir Payload
+          cp -R "$APP" Payload/
+          zip -qry MirrorLink.ipa Payload
+          ls -lh MirrorLink.ipa
+          unzip -l MirrorLink.ipa | grep -E 'Info.plist|\.appex/|embedded' | head -20
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MirrorLink-unsigned-ipa
+          path: MirrorLink.ipa
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: build-log
+          path: ios/build.log
+          if-no-files-found: ignore

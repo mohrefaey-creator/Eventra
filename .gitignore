@@ -10,3 +10,14 @@ android/*/build/
 android/local.properties
 *.keystore
 *.jks
+
+# iOS (the Xcode project is generated from ios/project.yml)
+ios/MirrorLink.xcodeproj/
+ios/App/Info.plist
+ios/Broadcast/Info.plist
+ios/App/*.entitlements
+ios/Broadcast/*.entitlements
+ios/MirrorLinkCore/.build/
+ios/build/
+.build/
+*.ipa

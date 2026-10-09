@@ -1,0 +1,108 @@
+# Generates MirrorLink.xcodeproj:   brew install xcodegen && cd ios && xcodegen
+# (The project file is not checked in, so it never drifts from this description.)
+name: MirrorLink
+
+options:
+  bundleIdPrefix: com.mohrefaey
+  deploymentTarget:
+    iOS: "15.0"
+  developmentLanguage: en
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    # Change these two for your own copy. The App Group name is "group." + the bundle id.
+    MIRRORLINK_BUNDLE_ID: com.mohrefaey.mirrorlink
+    MIRRORLINK_SERVER: https://mirror.example.com
+
+packages:
+  MirrorLinkCore:
+    path: MirrorLinkCore
+  WebRTC:
+    url: https://github.com/stasel/WebRTC
+    exactVersion: 150.0.0
+
+targets:
+  MirrorLink:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+        excludes: ["Info.plist", "*.entitlements"]
+      - path: Shared
+    dependencies:
+      - package: MirrorLinkCore
+      - target: MirrorLinkBroadcast
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(MIRRORLINK_BUNDLE_ID)
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        GENERATE_INFOPLIST_FILE: NO
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: MirrorLink
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        CFBundleURLTypes:
+          - CFBundleURLName: $(MIRRORLINK_BUNDLE_ID)
+            CFBundleURLSchemes: [mirrorlink]
+        MirrorLinkServer: $(MIRRORLINK_SERVER)
+        ITSAppUsesNonExemptEncryption: false
+        # A personal tool: allow a plain-http server on the home network as well as https.
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        NSLocalNetworkUsageDescription: MirrorLink connects to your laptop or screen on the same Wi-Fi to show your screen on it.
+        NSBonjourServices: [_mirrorlink._tcp]
+    entitlements:
+      path: App/MirrorLink.entitlements
+      properties:
+        com.apple.security.application-groups: ["group.$(MIRRORLINK_BUNDLE_ID)"]
+
+  MirrorLinkBroadcast:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Broadcast
+        excludes: ["Info.plist", "*.entitlements"]
+      - path: Shared
+    dependencies:
+      - package: MirrorLinkCore
+      - package: WebRTC
+      - sdk: ReplayKit.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(MIRRORLINK_BUNDLE_ID).broadcast
+        SKIP_INSTALL: YES
+        GENERATE_INFOPLIST_FILE: NO
+    info:
+      path: Broadcast/Info.plist
+      properties:
+        CFBundleDisplayName: MirrorLink
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.broadcast-services-upload
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).SampleHandler
+          RPBroadcastProcessMode: RPBroadcastProcessModeSampleBuffer
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        NSLocalNetworkUsageDescription: MirrorLink connects to your laptop or screen on the same Wi-Fi to show your screen on it.
+        NSBonjourServices: [_mirrorlink._tcp]
+    entitlements:
+      path: Broadcast/MirrorLinkBroadcast.entitlements
+      properties:
+        com.apple.security.application-groups: ["group.$(MIRRORLINK_BUNDLE_ID)"]
