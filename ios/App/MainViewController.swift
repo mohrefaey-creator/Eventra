@@ -60,6 +60,7 @@ final class MainViewController: UIViewController, UITextFieldDelegate {
         statusToken = DarwinNotifier.observe(DarwinNotifier.statusChanged) { [weak self] in self?.reflectBroadcast() }
         LocalNetworkPermission.requestOnce()
         Diag.log("app opened | " + AppIdentity.describe().replacingOccurrences(of: "\n", with: " | "))
+        Diag.log(AppIdentity.videoLibraryReport())
         syncForm()
         // The extension ignores a request older than ten minutes, so keep it fresh while this screen is open.
         refreshTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { [weak self] _ in self?.syncForm(refreshOnly: true) }

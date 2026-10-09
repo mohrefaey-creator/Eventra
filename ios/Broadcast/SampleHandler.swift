@@ -4,6 +4,25 @@ import MirrorLinkCore
 import ReplayKit
 import UIKit
 
+#if PROBE
+/// The test build of the broadcast part: it has no video library inside. It only proves that iOS can start this part
+/// at all, by saying so to the server's log, and then stops itself with a message.
+final class SampleHandler: RPBroadcastSampleHandler {
+    override init() {
+        super.init()
+        Diag.log("TEST BUILD: broadcast process started")
+        Diag.flush(timeout: 2)
+    }
+
+    override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
+        Diag.log("TEST BUILD: broadcast started | " + AppIdentity.describe().replacingOccurrences(of: "\n", with: " | "))
+        Diag.flush()
+        finishBroadcastWithError(NSError(domain: "MirrorLink", code: 2, userInfo: [
+            NSLocalizedDescriptionKey: "Test build: the broadcast part started correctly. It does not send video.",
+        ]))
+    }
+}
+#else
 /// Runs inside iOS's broadcast process: ReplayKit hands it the screen, and it streams that to the receiver.
 /// iOS allows such an extension very little memory (about 50 MB), so everything here is kept small.
 final class SampleHandler: RPBroadcastSampleHandler, SenderSessionListener {
@@ -19,6 +38,7 @@ final class SampleHandler: RPBroadcastSampleHandler, SenderSessionListener {
     override init() {
         super.init()
         Diag.log("broadcast process started")
+        Diag.flush(timeout: 2) // iOS can stop this process at any moment; get the first line out now
     }
 
     override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
@@ -156,3 +176,4 @@ final class SampleHandler: RPBroadcastSampleHandler, SenderSessionListener {
         finishBroadcastWithError(NSError(domain: "MirrorLink", code: 1, userInfo: [NSLocalizedDescriptionKey: message]))
     }
 }
+#endif

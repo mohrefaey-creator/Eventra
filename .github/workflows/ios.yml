@@ -35,14 +35,34 @@ jobs:
         run: swift test
 
   app:
-    name: Build unsigned IPA
+    name: Build unsigned IPA (${{ matrix.flavor }})
     needs: core
     runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        # full  = the real app.
+        # probe = a test copy whose broadcast part has no video library inside. It only proves that iOS can start the
+        #         broadcast part at all; if the real one stays silent and this one reports in, the video library is the cause.
+        flavor: [full, probe]
     steps:
       - uses: actions/checkout@v4
 
       - name: Install tools
-        run: brew install xcodegen ldid
+        run: brew install xcodegen
+
+      - name: Leave the video library out of the test copy
+        if: matrix.flavor == 'probe'
+        run: |
+          python3 - <<'PY'
+          p = "ios/project.yml"
+          s = open(p).read()
+          head, ext = s.split("  MirrorLinkBroadcast:\n", 1)
+          assert "      - package: WebRTC\n" in ext
+          ext = ext.replace("      - package: WebRTC\n", "", 1)
+          open(p, "w").write(head + "  MirrorLinkBroadcast:\n" + ext)
+          PY
+          sed -n '/^  MirrorLinkBroadcast:/,/^    settings:/p' ios/project.yml
 
       - name: Generate the Xcode project
         working-directory: ios
@@ -52,34 +72,32 @@ jobs:
         working-directory: ios
         env:
           SERVER: ${{ inputs.server || env.DEFAULT_SERVER }}
+          FLAGS: ${{ matrix.flavor == 'probe' && 'PROBE' || '' }}
         run: |
           set -o pipefail
           xcodebuild -project MirrorLink.xcodeproj -scheme MirrorLink \
             -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
             -derivedDataPath build \
-            MIRRORLINK_BUNDLE_ID="$BUNDLE_ID" MIRRORLINK_SERVER="$SERVER" \
+            MIRRORLINK_BUNDLE_ID="$BUNDLE_ID" MIRRORLINK_SERVER="$SERVER" MIRRORLINK_FLAVOR_FLAGS="$FLAGS" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
             build | tee build.log
 
       - name: Package the IPA
+        env:
+          FLAVOR: ${{ matrix.flavor }}
         run: |
           set -euo pipefail
           APP=ios/build/Build/Products/Release-iphoneos/MirrorLink.app
           EXT="$APP/PlugIns/MirrorLinkBroadcast.appex"
           test -d "$APP" && test -d "$EXT"
 
-          # Stamp the App Group entitlement on both programs. A re-signing tool keeps these, which is what
-          # lets the app and its broadcast extension share the code you typed.
-          for name in MirrorLink MirrorLinkBroadcast; do
-            f=$(find ios -name "$name.entitlements" | head -1)
-            sed "s/\$(MIRRORLINK_BUNDLE_ID)/$BUNDLE_ID/g" "$f" > "/tmp/$name.entitlements"
-          done
-          ldid -S/tmp/MirrorLink.entitlements "$APP/MirrorLink"
-          ldid -S/tmp/MirrorLinkBroadcast.entitlements "$EXT/MirrorLinkBroadcast"
+          # No App Group entitlement is stamped on anything: a copy signed with a free Apple ID cannot have one, and a
+          # program that claims an entitlement its signing profile does not grant is refused by iOS when it starts.
+          # (A broadcast part that never starts is silent, which is exactly what was seen.)
 
-          # The broadcast extension loads WebRTC from the app's Frameworks folder. Xcode does not always put a
-          # package's framework there, so if it is missing copy it in from the package's download, and refuse
-          # to produce a file without it (the extension would crash the moment iOS starts it).
+          # The broadcast part loads WebRTC from the app's Frameworks folder. Xcode does not always put a package's
+          # framework there, so if it is missing copy it in from the package's download, and refuse to produce a file
+          # without it (the broadcast part would crash the moment iOS starts it).
           if [ ! -d "$APP/Frameworks/WebRTC.framework" ]; then
             SRC=$(find ios/build -maxdepth 9 -type d -name WebRTC.framework -path '*WebRTC.xcframework/ios-*' | grep -v -i simulator | head -1)
             echo "WebRTC.framework not embedded by Xcode; copying from: ${SRC:-<not found>}"
@@ -89,25 +107,43 @@ jobs:
           fi
           echo "--- what is inside the app"
           find "$APP" -maxdepth 3 \( -name '*.framework' -o -name '*.appex' \) | sort
-          otool -L "$EXT/MirrorLinkBroadcast" | grep -i -E 'webrtc|@rpath' || true
+          echo "--- libraries the broadcast part needs, and where it looks for them"
+          otool -L "$EXT/MirrorLinkBroadcast" | grep -v -E '/usr/lib|/System/Library' || true
           otool -l "$EXT/MirrorLinkBroadcast" | grep -A2 LC_RPATH | grep path || true
+          echo "--- entitlements and signature of each program"
+          for f in "$APP/MirrorLink" "$EXT/MirrorLinkBroadcast" "$APP/Frameworks/WebRTC.framework/WebRTC"; do
+            echo "$f"; codesign -d --entitlements - "$f" 2>&1 | head -8 || true
+          done
+          echo "--- minimum iOS and architecture"
+          for f in "$APP/MirrorLink" "$EXT/MirrorLinkBroadcast" "$APP/Frameworks/WebRTC.framework/WebRTC"; do
+            lipo -archs "$f"; vtool -show-build "$f" | grep -E 'platform|minos' | tr '\n' ' ' || true; echo
+          done
+          echo "--- the broadcast part's Info.plist"
+          plutil -p "$EXT/Info.plist"
+          if [ "$FLAVOR" = probe ]; then
+            if otool -L "$EXT/MirrorLinkBroadcast" | grep -q WebRTC; then echo "::error::the test copy still links WebRTC"; exit 1; fi
+          else
+            otool -L "$EXT/MirrorLinkBroadcast" | grep -q WebRTC || { echo "::error::the broadcast part does not link WebRTC"; exit 1; }
+          fi
           test -f "$APP/Frameworks/WebRTC.framework/WebRTC" || { echo "::error::WebRTC.framework is missing from the app"; exit 1; }
 
+          NAME=MirrorLink.ipa
+          [ "$FLAVOR" = probe ] && NAME=MirrorLink-TEST.ipa
           mkdir Payload
           cp -R "$APP" Payload/
-          zip -qry MirrorLink.ipa Payload
-          ls -lh MirrorLink.ipa
-          unzip -l MirrorLink.ipa | grep -E 'Info.plist|\.appex/|embedded' | head -20
+          zip -qry "$NAME" Payload
+          ls -lh "$NAME"
+          echo "IPA_NAME=$NAME" >> "$GITHUB_ENV"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: MirrorLink-unsigned-ipa
-          path: MirrorLink.ipa
+          name: ${{ matrix.flavor == 'probe' && 'MirrorLink-TEST-unsigned-ipa' || 'MirrorLink-unsigned-ipa' }}
+          path: ${{ env.IPA_NAME }}
           if-no-files-found: error
 
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: build-log
+          name: build-log-${{ matrix.flavor }}
           path: ios/build.log
           if-no-files-found: ignore

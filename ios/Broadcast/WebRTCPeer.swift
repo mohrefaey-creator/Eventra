@@ -1,3 +1,4 @@
+#if !PROBE // the test build of the broadcast part leaves the video library out
 import CoreMedia
 import CoreVideo
 import Foundation
@@ -273,3 +274,4 @@ extension WebRTCPeer: RTCPeerConnectionDelegate {
         if let buffer = buffer { deliver(buffer, rotation: rotation) }
     }
 }
+#endif

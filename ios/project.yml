@@ -12,11 +12,13 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "6"
+    CURRENT_PROJECT_VERSION: "7"
     TARGETED_DEVICE_FAMILY: "1,2"
     # Change these two for your own copy. The App Group name is "group." + the bundle id.
     MIRRORLINK_BUNDLE_ID: com.mohrefaey.mirrorlink
     MIRRORLINK_SERVER: https://mirror.example.com
+    # "PROBE" builds a test copy of the broadcast part without the video library (see .github/workflows/ios.yml).
+    MIRRORLINK_FLAVOR_FLAGS: ""
 
 packages:
   MirrorLinkCore:
@@ -89,6 +91,7 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(MIRRORLINK_BUNDLE_ID).broadcast
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) $(MIRRORLINK_FLAVOR_FLAGS)"
         SKIP_INSTALL: YES
         GENERATE_INFOPLIST_FILE: NO
     info:

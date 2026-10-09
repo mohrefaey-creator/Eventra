@@ -63,6 +63,30 @@ enum AppIdentity {
         return PairingLinks.normalizeServer(configured)
     }
 
+    /// Whether the video library that sits next to the app can be loaded by this copy (a bad signature would stop that),
+    /// and what the broadcast part's own files look like. For the server's log only.
+    static func videoLibraryReport() -> String {
+        let fm = FileManager.default
+        let library = appBundleURL.appendingPathComponent("Frameworks/WebRTC.framework")
+        var parts = ["video library present: \(fm.fileExists(atPath: library.path))"]
+        if let bundle = Bundle(url: library) {
+            do {
+                try bundle.loadAndReturnError()
+                parts.append("loads: yes")
+            } catch {
+                parts.append("loads: NO (\(error.localizedDescription))")
+            }
+        }
+        let plugins = appBundleURL.appendingPathComponent("PlugIns")
+        for url in (try? fm.contentsOfDirectory(at: plugins, includingPropertiesForKeys: nil)) ?? [] where url.pathExtension == "appex" {
+            let bundle = Bundle(url: url)
+            let executable = bundle?.executableURL.map { fm.fileExists(atPath: $0.path) } ?? false
+            let profile = fm.fileExists(atPath: url.appendingPathComponent("embedded.mobileprovision").path)
+            parts.append("\(url.lastPathComponent): program \(executable ? "present" : "MISSING"), profile \(profile ? "present" : "MISSING")")
+        }
+        return parts.joined(separator: " | ")
+    }
+
     /// A few plain lines for the screen, so a failed first run says what is wrong.
     static func describe() -> String {
         let signed = appGroups(inBundleAt: Bundle.main.bundleURL)
