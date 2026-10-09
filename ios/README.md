@@ -46,6 +46,15 @@ The .ipa is unsigned on purpose: you sign it yourself in step 2, so nothing secr
 A build takes about five minutes. The .ipa is about 6 MB, most of it the WebRTC library, which the build checks
 is really inside the app (the broadcast extension cannot start without it).
 
+### No app at all: the iPhone's own Screen Mirroring (AirPlay) to a Windows laptop
+
+If the sender app cannot be installed or its broadcast part will not start (see 2a), the iPhone/iPad can mirror with
+its built-in **Screen Mirroring** to an AirPlay receiver on the laptop. `.github/workflows/airplay-windows.yml` builds
+the open-source [UxPlay](https://github.com/FDH2/UxPlay) for Windows and packs it with everything it needs
+(about 70 MB). Run the workflow (or open the latest run), download **MirrorLink-AirPlay-Receiver-Windows**, unzip it and
+read `READ-ME.txt` inside. The build checks that the program and the GStreamer pieces it needs start on a clean Windows;
+that an iPhone really finds and mirrors to it has to be tried on your own network.
+
 ### 2a. Install from a Windows laptop (Sideloadly): the app opens, but the broadcast part does not run
 
 Tested on an iPhone 13 (iOS 26.2) with Sideloadly 0.70.1 and a free Apple ID: the app installs and opens, but iOS never
