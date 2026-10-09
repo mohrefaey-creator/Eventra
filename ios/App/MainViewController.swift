@@ -23,6 +23,8 @@ final class MainViewController: UIViewController, UITextFieldDelegate {
     private let startButton = UIButton(type: .system)
     private let statusLabel = UILabel()
     private let diagnosticsLabel = UILabel()
+    private let formBlock = UIStackView()
+    private let subtitleLabel = UILabel()
     private let picker = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 200, height: 54))
 
     init() {
@@ -70,6 +72,10 @@ final class MainViewController: UIViewController, UITextFieldDelegate {
             show("That link is not a MirrorLink pairing link.", problem: true)
             return
         }
+        if needsSetupScreen {
+            show("Code from the link: \(link.code). Tap Start mirroring and type it in the box that opens.")
+            return
+        }
         server = link.server
         defaults.set(link.server, forKey: "server")
         showServer()
@@ -104,8 +110,20 @@ final class MainViewController: UIViewController, UITextFieldDelegate {
 
     /// Saves the form where the extension can read it, and lets the real Start button (Apple's picker, laid over
     /// ours) be pressed only when the form is complete.
+    /// Without shared storage (an app signed through Sideloadly with a free Apple ID) the app cannot hand a form to its
+    /// broadcast part. The code is then typed in the screen iOS shows inside its own broadcast box, so this screen
+    /// only explains and starts.
+    private var needsSetupScreen: Bool { groupSuite == nil }
+
     private func syncForm(refreshOnly: Bool = false) {
         guard isViewLoaded else { return }
+        formBlock.isHidden = needsSetupScreen
+        if needsSetupScreen {
+            subtitleLabel.text = "1. Tap Start mirroring.\n2. In Apple's box, MirrorLink is already chosen. Tap Start Broadcast.\n3. Type the code shown on the receiving screen and tap Start Broadcast again."
+            picker.isUserInteractionEnabled = true
+            return
+        }
+        subtitleLabel.text = "Enter the code shown on the receiving screen, then tap Start."
         // While a broadcast is running its code is already used; do not put a fresh copy back for the next one.
         if refreshOnly && UIScreen.main.isCaptured { return }
         guard let config = currentConfig().config, let suite = groupSuite,
@@ -210,7 +228,7 @@ final class MainViewController: UIViewController, UITextFieldDelegate {
         title.adjustsFontForContentSizeCategory = true
         title.accessibilityTraits = .header
 
-        let subtitle = UILabel()
+        let subtitle = subtitleLabel
         subtitle.text = "Enter the code shown on the receiving screen, then tap Start."
         subtitle.font = .preferredFont(forTextStyle: .body)
         subtitle.textColor = .secondaryLabel
@@ -278,7 +296,12 @@ final class MainViewController: UIViewController, UITextFieldDelegate {
         stack.spacing = 14
         stack.isLayoutMarginsRelativeArrangement = true
         stack.layoutMargins = UIEdgeInsets(top: 24, left: 20, bottom: 24, right: 20)
-        for item in [title, subtitle, serverRow, field("Pairing code", codeField), field("This device's name", nameField), field("Quality", qualityControl), startButton, statusLabel, diagnosticsLabel] as [UIView] {
+        formBlock.axis = .vertical
+        formBlock.spacing = 14
+        for item in [serverRow, field("Pairing code", codeField), field("This device's name", nameField), field("Quality", qualityControl)] as [UIView] {
+            formBlock.addArrangedSubview(item)
+        }
+        for item in [title, subtitle, formBlock, startButton, statusLabel, diagnosticsLabel] as [UIView] {
             stack.addArrangedSubview(item)
         }
 

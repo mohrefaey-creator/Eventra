@@ -12,7 +12,7 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
     MARKETING_VERSION: "0.1.0"
-    CURRENT_PROJECT_VERSION: "3"
+    CURRENT_PROJECT_VERSION: "4"
     TARGETED_DEVICE_FAMILY: "1,2"
     # Change these two for your own copy. The App Group name is "group." + the bundle id.
     MIRRORLINK_BUNDLE_ID: com.mohrefaey.mirrorlink
@@ -39,6 +39,7 @@ targets:
       # so the app links it too. (Xcode embeds it; the cloud build also checks, see .github/workflows/ios.yml.)
       - package: WebRTC
       - target: MirrorLinkBroadcast
+      - target: MirrorLinkBroadcastSetup
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(MIRRORLINK_BUNDLE_ID)
@@ -110,3 +111,33 @@ targets:
       path: Broadcast/MirrorLinkBroadcast.entitlements
       properties:
         com.apple.security.application-groups: ["group.$(MIRRORLINK_BUNDLE_ID)"]
+
+  # The screen iOS shows inside its own broadcast box once MirrorLink is picked. It collects the code and hands it
+  # to the broadcast part directly, which works however the app is signed (no shared storage needed).
+  MirrorLinkBroadcastSetup:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: BroadcastSetup
+        excludes: ["Info.plist"]
+      - path: Shared
+    dependencies:
+      - package: MirrorLinkCore
+      - sdk: ReplayKit.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(MIRRORLINK_BUNDLE_ID).setupui
+        SKIP_INSTALL: YES
+        GENERATE_INFOPLIST_FILE: NO
+    info:
+      path: BroadcastSetup/Info.plist
+      properties:
+        CFBundleDisplayName: MirrorLink
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        MirrorLinkServer: $(MIRRORLINK_SERVER)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.broadcast-services-setupui
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).SetupViewController
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true

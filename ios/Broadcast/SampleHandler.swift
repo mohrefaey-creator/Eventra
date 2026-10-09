@@ -1,5 +1,6 @@
 import MirrorLinkCore
 import ReplayKit
+import UIKit
 
 /// Runs inside iOS's broadcast process: ReplayKit hands it the screen, and it streams that to the receiver.
 /// iOS allows such an extension very little memory (about 50 MB), so everything here is kept small.
@@ -10,18 +11,28 @@ final class SampleHandler: RPBroadcastSampleHandler, SenderSessionListener {
 
     override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
         Diag.log("broadcast started | " + AppIdentity.describe().replacingOccurrences(of: "\n", with: " | "))
-        guard let suite = suite else {
-            Diag.log("no shared storage, stopping")
-            finish("MirrorLink could not share settings with its broadcast part.\n" + AppIdentity.describe())
+        // The setup screen's answers come first: they work however the app was installed. The app's own saved
+        // form is the second source, for builds signed in Xcode where the app and extension can share storage.
+        var found: BroadcastConfig?
+        if let info = setupInfo, let code = info["code"] as? String, let server = info["server"] as? String {
+            found = BroadcastConfig(
+                server: server,
+                code: code,
+                deviceName: (info["name"] as? String) ?? UIDevice.current.name,
+                quality: Quality.from(key: info["quality"] as? String),
+                requestedAt: Date().timeIntervalSince1970
+            )
+            Diag.log("answers from the setup screen: server \(server), code ends \(code.suffix(2))", server: server)
+        } else if let suite = suite, let saved = SharedStore.load(suite: suite) {
+            found = saved
+            SharedStore.clearConfig(suite: suite) // a code is good for one attempt
+            Diag.log("answers from the app's saved form", server: saved.server)
+        }
+        guard let config = found else {
+            Diag.log("no answers (setup keys: \(setupInfo?.keys.joined(separator: ",") ?? "none")), stopping")
+            finish("MirrorLink did not get a code. Tap Start mirroring, choose MirrorLink, and type the code in the box that opens.")
             return
         }
-        guard let config = SharedStore.load(suite: suite) else {
-            Diag.log("no saved request found in \(suite), stopping")
-            finish("Open MirrorLink, type the code, then tap Start mirroring.")
-            return
-        }
-        Diag.log("request found: server \(config.server), code ends \(config.code.suffix(2)), quality \(config.quality.rawValue)", server: config.server)
-        SharedStore.clearConfig(suite: suite) // a code is good for one attempt
         report(.connecting, "Connecting…")
 
         let peer = WebRTCPeer(quality: config.quality)

@@ -6,7 +6,7 @@ import Foundation
 enum Diag {
     private static let who = AppIdentity.isExtensionProcess ? "ext" : "app"
 
-    static func log(_ message: String, server: String? = nil) {
+    static func log(_ message: String, server: String? = nil, as label: String? = nil) {
         let configured = Bundle.main.object(forInfoDictionaryKey: "MirrorLinkServer") as? String ?? ""
         let base = server ?? (configured.contains("$(") ? "" : configured)
         guard !base.isEmpty, let url = URL(string: base + "/api/diag") else { return }
@@ -14,7 +14,7 @@ enum Diag {
         request.httpMethod = "POST"
         request.timeoutInterval = 8
         request.setValue("text/plain; charset=utf-8", forHTTPHeaderField: "Content-Type")
-        request.httpBody = "[\(who)] \(message)".data(using: .utf8)
+        request.httpBody = "[\(label ?? who)] \(message)".data(using: .utf8)
         URLSession.shared.dataTask(with: request).resume()
     }
 }
