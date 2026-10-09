@@ -35,10 +35,9 @@ targets:
       - path: Shared
     dependencies:
       - package: MirrorLinkCore
-      # WebRTC is a dynamic framework. The broadcast extension finds it in the app's own Frameworks folder,
-      # so it has to be embedded here, in the app, even though only the extension uses it.
+      # WebRTC is a dynamic framework that the broadcast extension loads from the app's own Frameworks folder,
+      # so the app links it too. (Xcode embeds it; the cloud build also checks, see .github/workflows/ios.yml.)
       - package: WebRTC
-        embed: true
       - target: MirrorLinkBroadcast
     settings:
       base:

@@ -13,8 +13,8 @@ by opening the sheet again.
 
 | | |
 |---|---|
-| **Verified** | The pairing core (`MirrorLinkCore/`: links, protocol, session state machine, shared settings) has 31 tests that pass, 10 of them driving a real session against this repository's Node server. XcodeGen accepts `project.yml` and produces an app that embeds the broadcast extension. |
-| **Not verified** | Everything that needs Apple's SDK and a device: the screen (`App/`), the broadcast extension (`Broadcast/`), the WebRTC video, the cloud build below, signing and installing. None of the UIKit, ReplayKit or WebRTC code has been compiled yet, so expect a few compile errors on the first cloud build and a few surprises on the first real run, as the Android app had. |
+| **Verified** | The pairing core (`MirrorLinkCore/`: links, protocol, session state machine, shared settings) has 31 tests that pass on Linux and on a Mac, 10 of them driving a real session against this repository's Node server. The whole app, including the screen, the broadcast extension and the WebRTC code, compiles for iPhone and iPad with Xcode 16 on GitHub's Mac runners and is packaged into an `.ipa` (see the Actions tab). |
+| **Not verified** | Anything that needs a real device: that the extension starts and stays under iOS's memory limit, that video reaches the receiver, rotation, signing with a free Apple ID through Sideloadly, and the App Group working after re-signing. The Android app needed two rounds of fixes on its first real run; expect the same here. |
 
 Known risks, so they are not a surprise:
 

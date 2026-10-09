@@ -77,12 +77,21 @@ jobs:
           ldid -S/tmp/MirrorLink.entitlements "$APP/MirrorLink"
           ldid -S/tmp/MirrorLinkBroadcast.entitlements "$EXT/MirrorLinkBroadcast"
 
-          # The broadcast extension needs WebRTC next to it. If the framework did not make it into the app,
-          # the extension would crash the moment iOS starts it, so refuse to produce such a file.
+          # The broadcast extension loads WebRTC from the app's Frameworks folder. Xcode does not always put a
+          # package's framework there, so if it is missing copy it in from the package's download, and refuse
+          # to produce a file without it (the extension would crash the moment iOS starts it).
+          if [ ! -d "$APP/Frameworks/WebRTC.framework" ]; then
+            SRC=$(find ios/build -maxdepth 9 -type d -name WebRTC.framework -path '*WebRTC.xcframework/ios-*' | grep -v -i simulator | head -1)
+            echo "WebRTC.framework not embedded by Xcode; copying from: ${SRC:-<not found>}"
+            test -n "$SRC"
+            mkdir -p "$APP/Frameworks"
+            cp -R "$SRC" "$APP/Frameworks/"
+          fi
           echo "--- what is inside the app"
           find "$APP" -maxdepth 3 \( -name '*.framework' -o -name '*.appex' \) | sort
           otool -L "$EXT/MirrorLinkBroadcast" | grep -i -E 'webrtc|@rpath' || true
-          test -d "$APP/Frameworks/WebRTC.framework" || { echo "::error::WebRTC.framework is missing from the app"; exit 1; }
+          otool -l "$EXT/MirrorLinkBroadcast" | grep -A2 LC_RPATH | grep path || true
+          test -f "$APP/Frameworks/WebRTC.framework/WebRTC" || { echo "::error::WebRTC.framework is missing from the app"; exit 1; }
 
           mkdir Payload
           cp -R "$APP" Payload/
