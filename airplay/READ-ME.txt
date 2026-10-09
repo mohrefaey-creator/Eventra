@@ -1,0 +1,20 @@
+MirrorLink AirPlay receiver for Windows
+=======================================
+
+Shows an iPhone or iPad screen on this laptop, using the phone's own Screen Mirroring (AirPlay).
+Nothing needs to be installed on the phone. Built from UxPlay (open source, GPL): https://github.com/FDH2/UxPlay
+
+1. Unzip this whole folder anywhere (for example your Desktop).
+2. The laptop and the phone must be on the SAME Wi-Fi network (not a guest network).
+3. Double-click  Start-AirPlay.bat  (or Start-AirPlay-Fullscreen.bat). If Windows asks about the firewall,
+   tick "Private networks" and click Allow.
+4. On the iPhone: swipe down from the top-right corner to open Control Center, tap  Screen Mirroring,
+   and choose  MirrorLink-Laptop.
+5. The phone's screen appears on the laptop. To stop: stop mirroring on the phone, or close the black window.
+
+If the phone does not list "MirrorLink-Laptop":
+ - right-click  Allow-Firewall.bat  and choose "Run as administrator", then start again;
+ - set the Wi-Fi network to "Private" (Windows Settings, Network, Wi-Fi, your network);
+ - switch off any VPN on the laptop and on the phone.
+
+To show it on a TV: connect the laptop to the TV with an HDMI cable and use Start-AirPlay-Fullscreen.bat.

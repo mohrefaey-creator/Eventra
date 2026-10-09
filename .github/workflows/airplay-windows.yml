@@ -1,0 +1,122 @@
+name: AirPlay receiver for Windows
+
+# Builds UxPlay (an open-source AirPlay mirroring receiver, https://github.com/FDH2/UxPlay) for Windows and packs it with
+# everything it needs into one zip, so an iPhone/iPad can mirror to a Windows laptop with its built-in Screen Mirroring
+# button, with no app installed on the phone. Run it from the Actions tab (Run workflow) and download the artifact.
+
+on:
+  workflow_dispatch:
+  push:
+    paths: [".github/workflows/airplay-windows.yml", "airplay/**"]
+
+jobs:
+  build:
+    name: Build UxPlay for Windows
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            git
+            zip
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
+            mingw-w64-ucrt-x86_64-pkgconf
+            mingw-w64-ucrt-x86_64-openssl
+            mingw-w64-ucrt-x86_64-libplist
+            mingw-w64-ucrt-x86_64-gstreamer
+            mingw-w64-ucrt-x86_64-gst-plugins-base
+            mingw-w64-ucrt-x86_64-gst-plugins-good
+            mingw-w64-ucrt-x86_64-gst-plugins-bad
+            mingw-w64-ucrt-x86_64-gst-libav
+
+      - name: Build UxPlay
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/FDH2/UxPlay uxplay-src
+          cd uxplay-src
+          git log -1 --format='UxPlay commit %H (%cs): %s'
+          grep -m3 -i -E 'project\(|VERSION' CMakeLists.txt || true
+          mkdir build && cd build
+          cmake -G Ninja -DCMAKE_BUILD_TYPE=Release ..
+          ninja
+          ls -l uxplay.exe
+
+      - name: Pack it with everything it needs
+        run: |
+          set -euo pipefail
+          D="$(cygpath -u "$GITHUB_WORKSPACE")/dist/UxPlay"
+          mkdir -p "$D/bin" "$D/lib/gstreamer-1.0" "$D/libexec/gstreamer-1.0"
+          cp uxplay-src/build/uxplay.exe "$D/bin/"
+          cp /ucrt64/bin/gst-inspect-1.0.exe /ucrt64/bin/gst-launch-1.0.exe "$D/bin/"
+          cp /ucrt64/libexec/gstreamer-1.0/gst-plugin-scanner.exe "$D/libexec/gstreamer-1.0/"
+
+          # Only the GStreamer plugins the receiver needs (decode H.264 and audio, convert, show on screen, play sound).
+          echo "--- plugins available"; ls /ucrt64/lib/gstreamer-1.0 | sed 's/^/  /'
+          for p in coreelements typefindfunctions app playback videoconvertscale videoconvert videoscale audioconvert \
+                   audioresample volume autodetect videoparsersbad audioparsers d3d11 d3d12 wasapi wasapi2 directsound \
+                   libav videofilter videorate audiorate fdkaac gio deinterlace dxva; do
+            for f in /ucrt64/lib/gstreamer-1.0/libgst${p}.dll; do
+              [ -f "$f" ] && cp "$f" "$D/lib/gstreamer-1.0/" && echo "plugin: ${p}"
+            done
+          done
+
+          # Every DLL those programs need, found again and again until nothing new turns up.
+          LIST="$(mktemp)"
+          ls "$D"/bin/*.exe "$D"/lib/gstreamer-1.0/*.dll "$D"/libexec/gstreamer-1.0/*.exe > "$LIST"
+          while [ -s "$LIST" ]; do
+            NEXT="$(mktemp)"
+            while read -r f; do
+              ldd "$f" 2>/dev/null | awk '/=> \/ucrt64\// {print $3}' | while read -r dll; do
+                base="$(basename "$dll")"
+                if [ ! -f "$D/bin/$base" ]; then cp "$dll" "$D/bin/" && echo "$D/bin/$base" >> "$NEXT"; fi
+              done
+            done < "$LIST"
+            mv "$NEXT" "$LIST"
+          done
+          echo "--- size"; du -sh "$D"; ls "$D/bin" | wc -l
+
+      - name: Add the launch files
+        run: |
+          set -euo pipefail
+          D="$(cygpath -u "$GITHUB_WORKSPACE")/dist/UxPlay"
+          cp airplay/Start-AirPlay.bat airplay/Start-AirPlay-Fullscreen.bat airplay/Allow-Firewall.bat airplay/READ-ME.txt "$D/"
+
+      - name: Check it starts from a clean Windows (no MSYS2)
+        shell: cmd
+        run: |
+          set "ROOT=%GITHUB_WORKSPACE%\dist\UxPlay"
+          set "PATH=%ROOT%\bin;C:\Windows\System32;C:\Windows"
+          set "GST_PLUGIN_SYSTEM_PATH_1_0=%ROOT%\lib\gstreamer-1.0"
+          set "GST_PLUGIN_PATH_1_0=%ROOT%\lib\gstreamer-1.0"
+          set "GST_PLUGIN_SCANNER=%ROOT%\libexec\gstreamer-1.0\gst-plugin-scanner.exe"
+          set "GST_REGISTRY_1_0=%TEMP%\uxplay-check-registry.bin"
+          for %%E in (h264parse avdec_h264 videoconvert videoscale autovideosink d3d11videosink audioconvert audioresample autoaudiosink wasapisink aacparse avdec_aac avdec_alac) do (
+            gst-inspect-1.0.exe %%E >nul 2>&1 && (echo ok: %%E) || (echo MISSING: %%E)
+          )
+          gst-inspect-1.0.exe h264parse >nul 2>&1 || exit /b 1
+          gst-inspect-1.0.exe avdec_h264 >nul 2>&1 || exit /b 1
+          gst-inspect-1.0.exe videoconvert >nul 2>&1 || exit /b 1
+          gst-inspect-1.0.exe autovideosink >nul 2>&1 || exit /b 1
+          uxplay.exe -h | findstr /i "uxplay"
+
+      - name: Zip
+        run: |
+          set -euo pipefail
+          cd "$(cygpath -u "$GITHUB_WORKSPACE")/dist"
+          zip -qr ../MirrorLink-AirPlay-Receiver-Windows.zip UxPlay
+          ls -lh ../MirrorLink-AirPlay-Receiver-Windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MirrorLink-AirPlay-Receiver-Windows
+          path: MirrorLink-AirPlay-Receiver-Windows.zip
+          if-no-files-found: error
