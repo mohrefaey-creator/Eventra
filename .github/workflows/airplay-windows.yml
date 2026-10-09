@@ -59,15 +59,23 @@ jobs:
           cp /ucrt64/bin/gst-inspect-1.0.exe /ucrt64/bin/gst-launch-1.0.exe "$D/bin/"
           cp /ucrt64/libexec/gstreamer-1.0/gst-plugin-scanner.exe "$D/libexec/gstreamer-1.0/"
 
-          # Only the GStreamer plugins the receiver needs (decode H.264 and audio, convert, show on screen, play sound).
-          echo "--- plugins available"; ls /ucrt64/lib/gstreamer-1.0 | sed 's/^/  /'
-          for p in coreelements typefindfunctions app playback videoconvertscale videoconvert videoscale audioconvert \
-                   audioresample volume autodetect videoparsersbad audioparsers d3d11 d3d12 wasapi wasapi2 directsound \
-                   libav videofilter videorate audiorate fdkaac gio deinterlace dxva; do
-            for f in /ucrt64/lib/gstreamer-1.0/libgst${p}.dll; do
-              [ -f "$f" ] && cp "$f" "$D/lib/gstreamer-1.0/" && echo "plugin: ${p}"
+          # The GStreamer plugins: every one from the "base" and "good" sets (UxPlay's pipelines use elements from many of
+          # them, for example "level" and "videoflip"), minus a few big ones it does not need, plus the H.264 parser,
+          # the Windows video/audio outputs and the libav decoders from the "bad" and "libav" sets.
+          P=mingw-w64-ucrt-x86_64
+          for pkg in gst-plugins-base gst-plugins-good gst-plugins-bad gst-libav gstreamer; do
+            pacman -Ql ${P}-${pkg} | awk '{print $2}' | grep -E '/lib/gstreamer-1.0/libgst[^/]*\.dll$' | while read -r f; do
+              name="$(basename "$f" .dll)"; name="${name#libgst}"
+              case "$pkg" in
+                gst-plugins-bad)
+                  case "$name" in videoparsersbad|d3d11|d3d12|wasapi|wasapi2|dxva|fdkaac|deinterlace) ;; *) continue ;; esac ;;
+                gst-plugins-good)
+                  case "$name" in soup|qmlgl|qt*|gtk*|vpx|lame|mpg123|twolame|pulse|jack|shout2|taglib|wavpack|speex|flac|dv|cairo|v4l2|oss*|ximage|aalib|libcaca|jpegformat) continue ;; esac ;;
+              esac
+              cp "$f" "$D/lib/gstreamer-1.0/" && echo "plugin: $name"
             done
           done
+          ls "$D/lib/gstreamer-1.0" | wc -l
 
           # Every DLL those programs need, found again and again until nothing new turns up.
           LIST="$(mktemp)"
@@ -99,14 +107,38 @@ jobs:
           set "GST_PLUGIN_PATH_1_0=%ROOT%\lib\gstreamer-1.0"
           set "GST_PLUGIN_SCANNER=%ROOT%\libexec\gstreamer-1.0\gst-plugin-scanner.exe"
           set "GST_REGISTRY_1_0=%TEMP%\uxplay-check-registry.bin"
-          for %%E in (h264parse avdec_h264 videoconvert videoscale autovideosink d3d11videosink audioconvert audioresample autoaudiosink wasapisink aacparse avdec_aac avdec_alac) do (
+          for %%E in (appsrc queue h264parse avdec_h264 decodebin videoconvert videoscale videoflip autovideosink d3d11videosink audioconvert audioresample volume level autoaudiosink wasapisink aacparse avdec_aac avdec_alac jpegdec imagefreeze textoverlay playbin) do (
             gst-inspect-1.0.exe %%E >nul 2>&1 && (echo ok: %%E) || (echo MISSING: %%E)
           )
           gst-inspect-1.0.exe h264parse >nul 2>&1 || exit /b 1
           gst-inspect-1.0.exe avdec_h264 >nul 2>&1 || exit /b 1
           gst-inspect-1.0.exe videoconvert >nul 2>&1 || exit /b 1
           gst-inspect-1.0.exe autovideosink >nul 2>&1 || exit /b 1
+          gst-inspect-1.0.exe level >nul 2>&1 || exit /b 1
+          gst-inspect-1.0.exe videoflip >nul 2>&1 || exit /b 1
+          gst-inspect-1.0.exe avdec_alac >nul 2>&1 || exit /b 1
           uxplay.exe -h | findstr /i "uxplay"
+
+      - name: Start the receiver for a few seconds and fail if it reports any error
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:GITHUB_WORKSPACE "dist\UxPlay"
+          $env:PATH = "$root\bin;C:\Windows\System32;C:\Windows"
+          $env:GST_PLUGIN_SYSTEM_PATH_1_0 = "$root\lib\gstreamer-1.0"
+          $env:GST_PLUGIN_PATH_1_0 = "$root\lib\gstreamer-1.0"
+          $env:GST_PLUGIN_SCANNER = "$root\libexec\gstreamer-1.0\gst-plugin-scanner.exe"
+          $env:GST_REGISTRY_1_0 = Join-Path $env:TEMP "uxplay-run-registry.bin"
+          $out = Join-Path $env:TEMP "uxplay-out.txt"; $err = Join-Path $env:TEMP "uxplay-err.txt"
+          $p = Start-Process -FilePath "$root\bin\uxplay.exe" -ArgumentList "-n","CI-Check","-nh" `
+               -RedirectStandardOutput $out -RedirectStandardError $err -PassThru -NoNewWindow
+          Start-Sleep -Seconds 10
+          $stillRunning = -not $p.HasExited
+          if ($stillRunning) { Stop-Process -Id $p.Id -Force }
+          "---- output"; Get-Content $out, $err
+          if (-not $stillRunning) { Write-Error "The receiver stopped by itself (exit code $($p.ExitCode))"; exit 1 }
+          if (Select-String -Path $out, $err -Pattern "ERROR|no element|CRITICAL|could not|failed" -Quiet) {
+            Write-Error "The receiver printed an error"; exit 1
+          }
 
       - name: Zip
         run: |
