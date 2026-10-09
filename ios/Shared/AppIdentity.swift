@@ -1,5 +1,6 @@
 import Foundation
 import MirrorLinkCore
+import UIKit
 
 /// Who this copy of the app really is. A re-signing tool (Sideloadly, AltStore) may change bundle identifiers and
 /// App Group names when it signs the app, so nothing here assumes the names written in project.yml: it asks the
@@ -50,14 +51,27 @@ enum AppIdentity {
         return nil
     }
 
+    /// The id iOS gives every app and extension from the same developer on this phone, so the app and its
+    /// broadcast part read the same value without sharing storage. Nobody else can guess it.
+    static var vendorID: String? { UIDevice.current.identifierForVendor?.uuidString }
+
+    /// The server written into the build (MIRRORLINK_SERVER): where the app leaves, and the broadcast part looks for,
+    /// the details typed in the app. nil for a build that was never given one.
+    static var builtInServer: String? {
+        let configured = Bundle.main.object(forInfoDictionaryKey: "MirrorLinkServer") as? String ?? ""
+        if configured.contains("$(") || configured.contains("mirror.example.com") { return nil }
+        return PairingLinks.normalizeServer(configured)
+    }
+
     /// A few plain lines for the screen, so a failed first run says what is wrong.
     static func describe() -> String {
         let signed = appGroups(inBundleAt: Bundle.main.bundleURL)
         return [
             "app id: \(Bundle.main.bundleIdentifier ?? "?")",
             "broadcast part: \(isExtensionProcess ? "(this is it)" : (broadcastExtensionID() ?? "NOT FOUND"))",
-            "shared storage: \(sharedSuite() ?? "NONE")",
+            "shared storage: \(sharedSuite() ?? "none (the server is used instead)")",
             "signed groups: \(signed.isEmpty ? "none" : signed.joined(separator: ", "))",
+            "phone id: \(vendorID.map { String($0.prefix(8)) } ?? "none")  built-in server: \(builtInServer ?? "none")",
         ].joined(separator: "\n")
     }
 }

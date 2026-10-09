@@ -34,6 +34,27 @@ final class SenderSessionIntegrationTests: XCTestCase {
         SenderSession(server: server ?? origin, code: code, deviceName: "Test iPad", peer: peer, listener: recorder)
     }
 
+    func testHandoffRoundTripThroughTheRealServer() {
+        let id = "3F2504E0-4F89-41D3-9A0C-0305E82C3301"
+        XCTAssertEqual(Handoff.fetch(id: id, rendezvous: origin, fallbackName: "x", attempts: 1), .nothingWaiting)
+
+        let config = BroadcastConfig(server: "http://192.168.1.5:3000", code: "123456", deviceName: "My iPhone", quality: .sharp, requestedAt: 0)
+        let posted = expectation(description: "posted")
+        var postError: String? = "not finished"
+        Handoff.post(config, id: id, rendezvous: origin) { postError = $0; posted.fulfill() }
+        wait(for: [posted], timeout: waitSeconds)
+        XCTAssertNil(postError)
+
+        guard case let .found(got) = Handoff.fetch(id: id, rendezvous: origin, fallbackName: "x", attempts: 1) else {
+            return XCTFail("the details should be waiting")
+        }
+        XCTAssertEqual(got.code, "123456")
+        XCTAssertEqual(got.server, "http://192.168.1.5:3000")
+        XCTAssertEqual(got.deviceName, "My iPhone")
+        XCTAssertEqual(got.quality, .sharp)
+        XCTAssertEqual(Handoff.fetch(id: "AAAAAAAA-0000-0000-0000-000000000000", rendezvous: origin, fallbackName: "x", attempts: 1), .nothingWaiting)
+    }
+
     func testPairsNegotiatesGoesLiveAndStopsCleanly() throws {
         let receiver = FakeReceiver(origin: origin)
         let code = try receiver.host()

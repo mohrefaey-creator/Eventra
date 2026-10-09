@@ -15,7 +15,6 @@ android/local.properties
 ios/MirrorLink.xcodeproj/
 ios/App/Info.plist
 ios/Broadcast/Info.plist
-ios/BroadcastSetup/Info.plist
 ios/App/*.entitlements
 ios/Broadcast/*.entitlements
 ios/MirrorLinkCore/.build/

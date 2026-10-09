@@ -49,8 +49,9 @@ final class MainViewController: UIViewController, UITextFieldDelegate {
         showServer()
         reflectBroadcast()
         NotificationCenter.default.addObserver(self, selector: #selector(captureChanged), name: UIScreen.capturedDidChangeNotification, object: nil)
-        NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { _ in
+        NotificationCenter.default.addObserver(forName: UIApplication.willResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
             Diag.log("app went inactive (a system box probably opened)")
+            self?.syncForm(refreshOnly: true) // make sure what is typed is waiting for the broadcast part
         }
         NotificationCenter.default.addObserver(forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main) { _ in
             Diag.log("app active again, screen captured: \(UIScreen.main.isCaptured)")
@@ -68,6 +69,11 @@ final class MainViewController: UIViewController, UITextFieldDelegate {
         super.viewDidLayoutSubviews()
         // Apple's picker keeps a small button inside; stretch it so a tap anywhere on "Start mirroring" reaches it.
         picker.subviews.compactMap { $0 as? UIButton }.first?.frame = picker.bounds
+        // On a wide screen (iPad) keep the form a readable width, in the middle.
+        let side = max(20, (view.bounds.width - 560) / 2)
+        if stack.layoutMargins.left != side {
+            stack.layoutMargins = UIEdgeInsets(top: 24, left: side, bottom: 24, right: side)
+        }
     }
 
     // MARK: - links
@@ -77,10 +83,6 @@ final class MainViewController: UIViewController, UITextFieldDelegate {
         loadViewIfNeeded()
         guard let link = PairingLinks.parse(text) else {
             show("That link is not a MirrorLink pairing link.", problem: true)
-            return
-        }
-        if needsSetupScreen {
-            show("Code from the link: \(link.code). Tap Start mirroring and type it in the box that opens.")
             return
         }
         server = link.server
@@ -98,8 +100,6 @@ final class MainViewController: UIViewController, UITextFieldDelegate {
         syncForm()
         if let problem = currentConfig().problem {
             show(problem, problem: true)
-        } else if groupSuite == nil {
-            show("This copy of the app cannot share settings with its broadcast part.\n\n" + AppIdentity.describe(), problem: true)
         } else {
             show("Tap Start mirroring once more, then Start Broadcast.")
         }
@@ -115,34 +115,36 @@ final class MainViewController: UIViewController, UITextFieldDelegate {
         return (BroadcastConfig(server: origin, code: code, deviceName: name, quality: quality, requestedAt: Date().timeIntervalSince1970), nil)
     }
 
-    /// Saves the form where the extension can read it, and lets the real Start button (Apple's picker, laid over
+    /// Leaves the form where the broadcast part can read it, and lets the real Start button (Apple's picker, laid over
     /// ours) be pressed only when the form is complete.
-    /// Without shared storage (an app signed through Sideloadly with a free Apple ID) the app cannot hand a form to its
-    /// broadcast part. The code is then typed in the screen iOS shows inside its own broadcast box, so this screen
-    /// only explains and starts.
-    private var needsSetupScreen: Bool { groupSuite == nil }
-
+    /// Two places are used: the shared storage when this copy has one (an Xcode build), and always the server, under
+    /// this phone's id. A copy re-signed with a free Apple ID has no shared storage, so the server is what it relies on.
     private func syncForm(refreshOnly: Bool = false) {
         guard isViewLoaded else { return }
-        formBlock.isHidden = needsSetupScreen
-        if needsSetupScreen {
-            subtitleLabel.text = "1. Tap Start mirroring.\n2. In Apple's box, MirrorLink is already chosen. Tap Start Broadcast.\n3. Type the code shown on the receiving screen and tap Start Broadcast again."
-            picker.isUserInteractionEnabled = true
-            return
-        }
-        subtitleLabel.text = "Enter the code shown on the receiving screen, then tap Start."
         // While a broadcast is running its code is already used; do not put a fresh copy back for the next one.
         if refreshOnly && UIScreen.main.isCaptured { return }
-        guard let config = currentConfig().config, let suite = groupSuite,
-              SharedStore.save(config, suite: suite, resetStatus: !refreshOnly)
-        else {
+        guard let config = currentConfig().config else {
             picker.isUserInteractionEnabled = false
             return
         }
         defaults.set(config.deviceName, forKey: "deviceName")
         defaults.set(config.quality.rawValue, forKey: "quality")
+        if let suite = groupSuite { _ = SharedStore.save(config, suite: suite, resetStatus: !refreshOnly) }
+        leaveOnServer(config, announce: !refreshOnly)
         picker.isUserInteractionEnabled = true
-        if !refreshOnly { Diag.log("form ready and saved for the broadcast part, code ends \(config.code.suffix(2))", server: config.server) }
+    }
+
+    private func leaveOnServer(_ config: BroadcastConfig, announce: Bool) {
+        guard let id = AppIdentity.vendorID, let rendezvous = AppIdentity.builtInServer else {
+            if announce { Diag.log("cannot leave the details on a server: no phone id or no built-in server address") }
+            return
+        }
+        Handoff.post(config, id: id, rendezvous: rendezvous) { error in
+            guard announce else { return }
+            Diag.log(error == nil
+                ? "details left on the server for the broadcast part, code ends \(config.code.suffix(2)), phone id \(id.prefix(8))"
+                : "could not leave the details on the server: \(error ?? "?")", server: rendezvous)
+        }
     }
 
     @objc private func changeServerTapped() {
@@ -246,7 +248,7 @@ final class MainViewController: UIViewController, UITextFieldDelegate {
         title.accessibilityTraits = .header
 
         let subtitle = subtitleLabel
-        subtitle.text = "Enter the code shown on the receiving screen, then tap Start."
+        subtitle.text = "Enter the code shown on the receiving screen, then tap Start mirroring and, in Apple's box, Start Broadcast."
         subtitle.font = .preferredFont(forTextStyle: .body)
         subtitle.textColor = .secondaryLabel
         subtitle.numberOfLines = 0
@@ -333,9 +335,12 @@ final class MainViewController: UIViewController, UITextFieldDelegate {
         view.addSubview(scroll)
         scroll.translatesAutoresizingMaskIntoConstraints = false
         stack.translatesAutoresizingMaskIntoConstraints = false
-        let widest = stack.widthAnchor.constraint(lessThanOrEqualToConstant: 560)
+        // The stack is exactly as wide as the screen and fills the scrollable area edge to edge. (Without the leading and
+        // trailing pins the scroll view does not know how wide its content is and the page ends up shifted.)
         let full = stack.widthAnchor.constraint(equalTo: scroll.frameLayoutGuide.widthAnchor)
         full.priority = UILayoutPriority(999) // stronger than any label's wish to be wide
+        scroll.alwaysBounceHorizontal = false
+        scroll.showsHorizontalScrollIndicator = false
         NSLayoutConstraint.activate([
             scroll.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             scroll.bottomAnchor.constraint(equalTo: view.bottomAnchor),
@@ -343,8 +348,8 @@ final class MainViewController: UIViewController, UITextFieldDelegate {
             scroll.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             stack.topAnchor.constraint(equalTo: scroll.contentLayoutGuide.topAnchor),
             stack.bottomAnchor.constraint(equalTo: scroll.contentLayoutGuide.bottomAnchor),
-            stack.centerXAnchor.constraint(equalTo: scroll.frameLayoutGuide.centerXAnchor),
-            widest,
+            stack.leadingAnchor.constraint(equalTo: scroll.contentLayoutGuide.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: scroll.contentLayoutGuide.trailingAnchor),
             full,
             codeField.heightAnchor.constraint(equalToConstant: 60),
             nameField.heightAnchor.constraint(equalToConstant: 44),

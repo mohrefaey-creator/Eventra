@@ -379,6 +379,49 @@ describe('debug log for new sender apps', async () => {
   });
 });
 
+describe('pickup for a phone app\'s broadcast part', async () => {
+  const server = await startServer({ port: 0, tls: false, quiet: true, host: '127.0.0.1' });
+  after(() => server.close());
+  const base = `http://127.0.0.1:${server.httpPort}/api/handoff`;
+  const id = '3F2504E0-4F89-41D3-9A0C-0305E82C3301';
+  const post = (body) => fetch(base, { method: 'POST', body: typeof body === 'string' ? body : JSON.stringify(body) });
+
+  it('hands the details back to whoever asks with the same id, and to nobody else', async () => {
+    assert.equal((await fetch(`${base}?id=${id}`)).status, 404);
+    const res = await post({ id, code: '123456', server: 'https://mirror.example.com', name: 'My iPhone', quality: 'sharp' });
+    assert.equal(res.status, 204);
+    const got = await (await fetch(`${base}?id=${id}`)).json();
+    assert.deepEqual(got, { code: '123456', server: 'https://mirror.example.com', name: 'My iPhone', quality: 'sharp' });
+    assert.equal((await fetch(`${base}?id=${id.replace('3F25', '4F25')}`)).status, 404);
+    assert.equal((await fetch(base)).status, 404);
+  });
+
+  it('a newer request replaces the older one', async () => {
+    await post({ id, code: '111111', server: 'http://192.168.1.5:3000', name: 'a' });
+    await post({ id, code: '222222', server: 'http://192.168.1.5:3000', name: 'b' });
+    assert.equal((await (await fetch(`${base}?id=${id}`)).json()).code, '222222');
+  });
+
+  it('refuses anything that is not a well formed request', async () => {
+    const ok = { id, code: '123456', server: 'https://mirror.example.com' };
+    assert.equal((await post('nonsense')).status, 400);
+    assert.equal((await post({ ...ok, code: '12345' })).status, 400);
+    assert.equal((await post({ ...ok, code: '12345a' })).status, 400);
+    assert.equal((await post({ ...ok, id: 'x' })).status, 400);
+    assert.equal((await post({ ...ok, id: '../../etc' })).status, 400);
+    assert.equal((await post({ ...ok, server: 'javascript:alert(1)' })).status, 400);
+    assert.equal((await post({ ...ok, server: 'https://a b' })).status, 400);
+    assert.equal((await fetch(base, { method: 'DELETE' })).status, 405);
+  });
+
+  it('trims the name and keeps the stored copy small', async () => {
+    await post({ id, code: '123456', server: 'https://m.example.com', name: 'n'.repeat(500), quality: '<script>' });
+    const got = await (await fetch(`${base}?id=${id}`)).json();
+    assert.equal(got.name.length, 60);
+    assert.equal(got.quality, 'balanced');
+  });
+});
+
 describe('native app support', async () => {
   const fp = 'A1:B2:C3:D4:E5:F6:07:18:29:3A:4B:5C:6D:7E:8F:90:A1:B2:C3:D4:E5:F6:07:18:29:3A:4B:5C:6D:7E:8F:90';
 

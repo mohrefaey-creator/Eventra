@@ -78,6 +78,19 @@ ICE servers come from `GET /api/info` → `iceServers` (an `RTCIceServer[]`).
 The sender adds a video track (and optionally audio) and offers `sendonly`; the receiver is receive-only.
 H.264 and VP8 are both fine; the receiver is a browser.
 
+## Phone app hand-off (not part of pairing)
+
+A phone app whose capture runs in a separate process that cannot read the app's saved form (the iOS broadcast
+extension of a copy re-signed with a free Apple ID) uses a small note box on the server:
+
+- `POST /api/handoff` with `{ "id", "code", "server", "name", "quality" }` stores the details under `id` (the phone's
+  app-vendor id, 16–64 hex digits and dashes). `code` must be 6 digits, `server` an http(s) address. `204` on success,
+  `400` when malformed.
+- `GET /api/handoff?id=…` returns `{ code, server, name, quality }` or `404`.
+
+Notes last five minutes, at most 500 are kept, and a newer one replaces an older one with the same id. The id acts as
+the secret: it is not guessable, and joining still needs the receiver's approval.
+
 ## Sequence
 
 ```

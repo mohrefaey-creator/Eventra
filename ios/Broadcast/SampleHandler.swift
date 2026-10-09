@@ -1,3 +1,5 @@
+import CoreMedia
+import CoreVideo
 import MirrorLinkCore
 import ReplayKit
 import UIKit
@@ -9,32 +11,52 @@ final class SampleHandler: RPBroadcastSampleHandler, SenderSessionListener {
     private var peer: WebRTCPeer?
     private lazy var suite: String? = AppIdentity.sharedSuite()
 
+    // Touched from ReplayKit's queue and the heartbeat's.
+    private let counterLock = NSLock()
+    private var frames = 0
+    private var heartbeat: DispatchSourceTimer?
+
+    override init() {
+        super.init()
+        Diag.log("broadcast process started")
+    }
+
     override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
         Diag.log("broadcast started | " + AppIdentity.describe().replacingOccurrences(of: "\n", with: " | "))
-        // The setup screen's answers come first: they work however the app was installed. The app's own saved
-        // form is the second source, for builds signed in Xcode where the app and extension can share storage.
-        var found: BroadcastConfig?
-        if let info = setupInfo, let code = info["code"] as? String, let server = info["server"] as? String {
-            found = BroadcastConfig(
-                server: server,
-                code: code,
-                deviceName: (info["name"] as? String) ?? UIDevice.current.name,
-                quality: Quality.from(key: info["quality"] as? String),
-                requestedAt: Date().timeIntervalSince1970
-            )
-            Diag.log("answers from the setup screen: server \(server), code ends \(code.suffix(2))", server: server)
-        } else if let suite = suite, let saved = SharedStore.load(suite: suite) {
-            found = saved
+        startHeartbeat()
+
+        // 1. The app's saved form, for builds where the app and this part can share storage (signed in Xcode).
+        if let suite = suite, let saved = SharedStore.load(suite: suite) {
             SharedStore.clearConfig(suite: suite) // a code is good for one attempt
-            Diag.log("answers from the app's saved form", server: saved.server)
-        }
-        guard let config = found else {
-            Diag.log("no answers (setup keys: \(setupInfo?.keys.joined(separator: ",") ?? "none")), stopping")
-            finish("MirrorLink did not get a code. Tap Start mirroring, choose MirrorLink, and type the code in the box that opens.")
+            Diag.log("details from the app's saved form", server: saved.server)
+            begin(saved)
             return
         }
-        report(.connecting, "Connecting…")
 
+        // 2. The server: the app leaves what was typed there under the phone's own id. This is the way that works
+        //    for an app re-signed with a free Apple ID, which gets no shared storage.
+        guard let id = AppIdentity.vendorID, let rendezvous = AppIdentity.builtInServer else {
+            finish("This copy of MirrorLink was built without a server address, so it cannot look up the code. Rebuild it with your server address.", why: "no phone id or built-in server")
+            return
+        }
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let result = Handoff.fetch(id: id, rendezvous: rendezvous, fallbackName: UIDevice.current.name)
+            DispatchQueue.main.async {
+                switch result {
+                case let .found(config):
+                    Diag.log("details picked up from the server, code ends \(config.code.suffix(2)), phone id \(id.prefix(8))", server: rendezvous)
+                    self?.begin(config)
+                case .nothingWaiting:
+                    self?.finish("MirrorLink has no code for this broadcast. Open the app, type the code shown on the receiving screen, then tap Start mirroring.", why: "nothing waiting on the server for phone id \(id.prefix(8))")
+                case let .failed(reason):
+                    self?.finish("MirrorLink could not reach its server to get the code (\(reason)).", why: "pickup failed: \(reason)")
+                }
+            }
+        }
+    }
+
+    private func begin(_ config: BroadcastConfig) {
+        report(.connecting, "Connecting…")
         let peer = WebRTCPeer(quality: config.quality)
         let session = SenderSession(
             server: config.server,
@@ -57,13 +79,21 @@ final class SampleHandler: RPBroadcastSampleHandler, SenderSessionListener {
     /// The person stopped sharing (Control Center, or the red status bar).
     override func broadcastFinished() {
         Diag.log("broadcast finished by iOS or the person")
+        heartbeat?.cancel()
         session?.stop()
+        Diag.flush(timeout: 1.5)
     }
 
     override func processSampleBuffer(_ sampleBuffer: CMSampleBuffer, with sampleBufferType: RPSampleBufferType) {
-        if sampleBufferType == .video {
-            peer?.push(sampleBuffer)
+        guard sampleBufferType == .video else { return }
+        counterLock.lock()
+        frames += 1
+        let first = frames == 1
+        counterLock.unlock()
+        if first, let image = CMSampleBufferGetImageBuffer(sampleBuffer) {
+            Diag.log("first screen picture: \(CVPixelBufferGetWidth(image))x\(CVPixelBufferGetHeight(image))")
         }
+        peer?.push(sampleBuffer)
     }
 
     // MARK: - SenderSessionListener
@@ -87,11 +117,29 @@ final class SampleHandler: RPBroadcastSampleHandler, SenderSessionListener {
         report(.ended, reason.message, problem: reason.isProblem)
         // When the person stopped it themselves iOS is already tearing the broadcast down.
         if reason != .stopped {
-            finish(reason.message)
+            finish(reason.message, why: "session ended: \(reason)")
         }
     }
 
     // MARK: - helpers
+
+    /// A few lines early on, so a first run shows from the server's side that this process is alive and getting pictures.
+    private func startHeartbeat() {
+        let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+        var beats = 0
+        timer.schedule(deadline: .now() + 5, repeating: 10)
+        timer.setEventHandler { [weak self] in
+            guard let self = self else { return }
+            beats += 1
+            self.counterLock.lock()
+            let count = self.frames
+            self.counterLock.unlock()
+            Diag.log("alive, \(count) pictures from the screen so far")
+            if beats >= 6 { self.heartbeat?.cancel() }
+        }
+        heartbeat = timer
+        timer.resume()
+    }
 
     private func report(_ phase: BroadcastStatus.Phase, _ message: String?, problem: Bool = false) {
         guard let suite = suite else { return }
@@ -100,8 +148,11 @@ final class SampleHandler: RPBroadcastSampleHandler, SenderSessionListener {
         DarwinNotifier.post(DarwinNotifier.statusChanged)
     }
 
-    /// Ends the broadcast and lets iOS show `message` to the person.
-    private func finish(_ message: String) {
+    /// Ends the broadcast and lets iOS show `message` to the person. `why` goes to the server's log first.
+    private func finish(_ message: String, why: String) {
+        Diag.log("stopping: \(why)")
+        heartbeat?.cancel()
+        Diag.flush()
         finishBroadcastWithError(NSError(domain: "MirrorLink", code: 1, userInfo: [NSLocalizedDescriptionKey: message]))
     }
 }

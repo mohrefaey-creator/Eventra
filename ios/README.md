@@ -20,8 +20,11 @@ Known risks, so they are not a surprise:
 
 - **Memory.** iOS lets a broadcast extension use about 50 MB. The video is downscaled and H.264 (hardware) is
   preferred to stay under it. If iOS kills the broadcast on a large iPad, pick **Low bandwidth** in the app.
-- **App Group.** The app and its extension pass the code through an App Group (`group.<bundle id>`). It works
-  with a normal Apple ID in Xcode. With a re-signing tool it depends on the tool preserving the group.
+- **Passing the code from the app to the extension.** They are separate programs. In an Xcode build they share an App
+  Group (`group.<bundle id>`). A copy re-signed with a free Apple ID (Sideloadly) gets no App Group, so the app also
+  leaves what you typed on the server (`POST /api/handoff`, kept five minutes) under the phone's own vendor id, and
+  the extension picks it up from there (`GET /api/handoff?id=…`). That needs the build to know your server's address:
+  start the workflow with the `server` field filled in.
 - **Rotation** of the picture when you turn the device is untested.
 
 ## Getting the app onto your device
@@ -93,8 +96,10 @@ the names in `project.yml` (see `Shared/AppIdentity.swift`). The grey lines at t
 say what it found:
 
 - `broadcast part: NOT FOUND` means the extension was not installed with the app.
-- `shared storage: NONE` means the signer did not give the app and its extension a common App Group, so the
-  code you type cannot reach the extension. Send those lines to whoever is helping you.
+- `shared storage: none (the server is used instead)` is normal for a Sideloadly copy: the code then travels
+  through the server, which needs `built-in server:` below it to show your server's address (not `none`).
+- `phone id` is the key the app and the extension use to find each other's note on the server.
+- Send those lines to whoever is helping you.
 
 A second way in, if the Start button does not open Apple's sheet: after typing the code in the app, open
 Control Center, press and hold the grey record button, pick **MirrorLink**, and tap **Start Broadcast**.

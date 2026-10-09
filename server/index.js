@@ -69,6 +69,27 @@ export function turnCredentials(secret, ttlSeconds = 3600, now = Date.now()) {
 
 const isLoopbackHost = (host) => /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/.test(host ?? '');
 
+const HANDOFF_TTL_MS = 5 * 60_000;
+const HANDOFF_MAX = 500;
+
+/** A phone app's pairing details for its broadcast part, or null if they are not well formed. */
+export function parseHandoff(raw) {
+  let v;
+  try {
+    v = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!v || typeof v !== 'object') return null;
+  const { id, code, server, name, quality } = v;
+  if (typeof id !== 'string' || !/^[0-9A-Fa-f-]{16,64}$/.test(id)) return null;
+  if (typeof code !== 'string' || !/^\d{6}$/.test(code)) return null;
+  if (typeof server !== 'string' || server.length > 200 || !/^https?:\/\/[^\s]+$/.test(server)) return null;
+  const cleanName = typeof name === 'string' ? name.slice(0, 60) : '';
+  const cleanQuality = typeof quality === 'string' && /^[a-z]{1,16}$/.test(quality) ? quality : 'balanced';
+  return { id, body: JSON.stringify({ code, server, name: cleanName, quality: cleanQuality }) };
+}
+
 /**
  * Start the server. Options mirror the environment variables documented in the README.
  * Resolves to { httpPort, httpsPort, close() }.
@@ -104,6 +125,9 @@ export async function startServer(options = {}) {
   const lan = lanAddresses();
   const signaling = createSignaling(signalingOptions);
   const diagLines = [];
+  // Phone apps whose broadcast part cannot read the app's own saved form (a re-signed copy gets no shared storage on
+  // iOS) leave the pairing details here, under the phone's own app-vendor id, and the broadcast part picks them up.
+  const handoffs = new Map();
   let boundHttpsPort = null;
 
   function senderOrigins(req) {
@@ -113,6 +137,41 @@ export async function startServer(options = {}) {
     if (viaTls && !isLoopbackHost(reqHost)) return [`https://${reqHost}`];
     if (boundHttpsPort) return lan.map((ip) => `https://${ip}:${boundHttpsPort}`);
     return lan.map((ip) => `http://${ip}:${port}`);
+  }
+
+  function handleHandoff(req, res, url) {
+    const now = Date.now();
+    for (const [key, entry] of handoffs) if (now - entry.at > HANDOFF_TTL_MS) handoffs.delete(key);
+    res.setHeader('Cache-Control', 'no-store');
+    if (req.method === 'GET') {
+      const entry = handoffs.get(url.searchParams.get('id') ?? '');
+      if (!entry) {
+        res.writeHead(404).end();
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': MIME['.json'] });
+      res.end(entry.body);
+      return;
+    }
+    if (req.method !== 'POST') {
+      res.writeHead(405, { Allow: 'GET, POST' }).end();
+      return;
+    }
+    let raw = '';
+    req.on('data', (chunk) => {
+      if (raw.length < 2048) raw += chunk;
+    });
+    req.on('end', () => {
+      const entry = parseHandoff(raw);
+      if (!entry) {
+        res.writeHead(400).end();
+        return;
+      }
+      handoffs.delete(entry.id); // re-insert so the oldest entries are first in line to be dropped
+      handoffs.set(entry.id, { at: now, body: entry.body });
+      while (handoffs.size > HANDOFF_MAX) handoffs.delete(handoffs.keys().next().value);
+      res.writeHead(204).end();
+    });
   }
 
   async function handle(req, res) {
@@ -134,6 +193,11 @@ export async function startServer(options = {}) {
       }
       res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(`${diagLines.join('\n')}\n`);
+      return;
+    }
+
+    if (url.pathname === '/api/handoff') {
+      handleHandoff(req, res, url);
       return;
     }
 

@@ -5,16 +5,23 @@ import Foundation
 /// Lines are plain text and never include passwords or codes in full.
 enum Diag {
     private static let who = AppIdentity.isExtensionProcess ? "ext" : "app"
+    private static let pending = DispatchGroup()
 
     static func log(_ message: String, server: String? = nil, as label: String? = nil) {
-        let configured = Bundle.main.object(forInfoDictionaryKey: "MirrorLinkServer") as? String ?? ""
-        let base = server ?? (configured.contains("$(") ? "" : configured)
+        let base = server ?? AppIdentity.builtInServer ?? ""
         guard !base.isEmpty, let url = URL(string: base + "/api/diag") else { return }
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.timeoutInterval = 8
         request.setValue("text/plain; charset=utf-8", forHTTPHeaderField: "Content-Type")
         request.httpBody = "[\(label ?? who)] \(message)".data(using: .utf8)
-        URLSession.shared.dataTask(with: request).resume()
+        pending.enter()
+        URLSession.shared.dataTask(with: request) { _, _, _ in pending.leave() }.resume()
+    }
+
+    /// Waits (briefly) for lines that are still on their way. The broadcast part calls this before it ends itself,
+    /// because iOS stops the process right after, which would otherwise swallow the last and most useful lines.
+    static func flush(timeout: TimeInterval = 2.5) {
+        _ = pending.wait(timeout: .now() + timeout)
     }
 }
