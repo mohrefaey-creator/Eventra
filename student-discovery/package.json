@@ -1,0 +1,26 @@
+{
+  "name": "nextmind-student-discovery-prototype",
+  "version": "0.1.0",
+  "description": "Synthetic-data local prototype of the NextMind Student Discovery, Aptitude & University Major Fit module (Arabic / English). Not for real students.",
+  "type": "module",
+  "private": true,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "reset": "node server/index.js --reset-only",
+    "test": "node --test test/unit/*.test.js test/api/*.test.js",
+    "test:unit": "node --test test/unit/*.test.js",
+    "test:api": "node --test test/api/*.test.js",
+    "test:e2e": "node test/e2e/run.mjs",
+    "lint": "eslint \"web/js/**/*.js\" \"server/**/*.js\" \"domain/**/*.js\" \"test/**/*.{js,mjs}\"",
+    "check": "npm run lint && npm test"
+  },
+  "devDependencies": {
+    "axe-core": "^4.10.0",
+    "eslint": "^9.0.0",
+    "globals": "^15.0.0",
+    "playwright-core": "^1.50.0"
+  }
+}
