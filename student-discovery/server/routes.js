@@ -36,6 +36,9 @@ function linkedStudents(ctx) {
   return db.guardian_links.filter((l) => linkActive(l, actor.id, l.student_id, ctx.now)).map((l) => publicPersona(db.users[l.student_id]));
 }
 
+/** Behind an HTTPS proxy (a hosted demo) the cookie is also marked Secure. Plain-HTTP local use is unchanged. */
+const secureFlag = (ctx) => (ctx.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '');
+
 const publicPersona = (u) => ({ id: u.id, role: u.role, tenant_id: u.tenant_id, display_name: u.display_name, grade: u.grade ?? null, synthetic: true });
 
 export function registerRoutes(router, { sessions, clock }) {
@@ -60,12 +63,12 @@ export function registerRoutes(router, { sessions, clock }) {
     if (!p) throw notFound('persona');
     const s = sessions.login(p.id);
     audit({ ...ctx, actor: p }, { action: 'identity_stub.login', tenant_id: p.tenant_id, subject_ref: `user:${p.id}`, meta: { synthetic: true } });
-    return reply(200, { persona: publicPersona(p), csrf_token: s.csrf }, { 'Set-Cookie': `sd_session=${s.token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.floor(POLICY.session_ttl_ms / 1000)}` });
+    return reply(200, { persona: publicPersona(p), csrf_token: s.csrf }, { 'Set-Cookie': `sd_session=${s.token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${Math.floor(POLICY.session_ttl_ms / 1000)}${secureFlag(ctx)}` });
   }, { public: true, noCsrf: true, ...during });
 
   post(`${ID}/logout`, (ctx) => {
     if (ctx.session) sessions.destroy(ctx.session.token);
-    return reply(200, { ok: true }, { 'Set-Cookie': 'sd_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0' });
+    return reply(200, { ok: true }, { 'Set-Cookie': `sd_session=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0${secureFlag(ctx)}` });
   }, { public: true, noCsrf: true, tx: false, ...during });
 
   get(`${ID}/me`, (ctx) => ({

@@ -15,7 +15,7 @@
     "test:api": "node --test test/api/*.test.js",
     "test:contract": "node --test test/contract/*.test.js",
     "test:e2e": "node test/e2e/run.mjs",
-    "lint": "eslint \"web/js/**/*.js\" \"server/**/*.js\" \"domain/**/*.js\" \"test/**/*.{js,mjs}\"",
+    "lint": "eslint \"api/**/*.js\" \"web/js/**/*.js\" \"server/**/*.js\" \"domain/**/*.js\" \"test/**/*.{js,mjs}\"",
     "check": "npm run lint && npm test"
   },
   "devDependencies": {

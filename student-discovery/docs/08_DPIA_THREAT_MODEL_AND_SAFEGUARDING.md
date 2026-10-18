@@ -58,7 +58,7 @@ re-checks after slow bodies, consent-aware idempotency, loopback-only serving) c
 
 ## Known gaps (not hidden)
 1. Identity is a stand-in: anyone who can reach the server can sign in as any persona, and one person can therefore act as both four-eyes approvers. The server therefore only serves loopback hosts by default and refuses to start elsewhere without an explicit opt-in.
-2. Cookie lacks `Secure` (plain-HTTP local use); no TLS, HSTS or session rotation.
+2. The cookie is `Secure` only when a proxy says the request came over HTTPS (`X-Forwarded-Proto`); no TLS of its own, no HSTS, no session rotation.
 3. No encryption at rest; `data/db.json` is plaintext (synthetic data only). The audit HMAC key lives in the same file.
 4. Rollback uses a full copy of the database per mutating request; fine at prototype scale, not beyond it. Audit and consent history are append-only and can grow under sustained probing (rate limits slow it).
 5. The audit chain has no external anchor, so truncating its tail with database access is undetectable.
@@ -70,3 +70,4 @@ re-checks after slow bodies, consent-aware idempotency, loopback-only serving) c
 11. A conflict-of-interest reason is stored with the conflict record and shown nowhere (not in lists, not in the audit log, which keeps only its length). Who may read it, and for how long, is a school-policy decision that does not exist yet. The school admin sees who stepped away and when, never why.
 12. A student who loses their counselor (conflict or reassignment) is not told; the school admin sees them first in the assignments list, but nothing alerts the admin (the outbox event `discovery.assignment.conflict_declared` has no consumer here).
 13. Ending an assignment keeps the old counselor's notes in the student's record; they are visible to the next counselor (handover is by design) and to nobody the student has not shared with.
+14. The optional Vercel host (`api/index.js`) lifts the loopback-only Host check, so the persona sign-in is reachable by whoever can reach the URL. It is acceptable only behind Vercel Deployment Protection; the app itself cannot verify that. State is in memory per function instance (see README).

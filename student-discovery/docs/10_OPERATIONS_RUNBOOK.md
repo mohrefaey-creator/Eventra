@@ -14,6 +14,9 @@ until the platform, owners and legal decisions exist (see `12`).
 
 Do not bind `HOST=0.0.0.0` on a shared network: there is no real authentication.
 
+## Hosted demo (Vercel)
+See the README section. Check Deployment Protection is on before sharing the URL, expect state to reset when an instance restarts, and use runtime logs for diagnosis. Redeploy to reset everything.
+
 ## API contract
 `docs/api/openapi.yaml` and `docs/api/events.schema.json` describe every route and event. `npm run test:contract` checks them against the running server; run it after changing any route, response or event.
 

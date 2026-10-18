@@ -33,6 +33,14 @@ were created).
 | `SYNTHETIC_MODE` | `true` | Set `false` to see the **fail-closed** behavior: exploratory instruments refuse to start. |
 | `CHROMIUM_PATH` | auto-detected | Optional. PDF download of approved reports needs an installed Chromium or Chrome (looked up in `$PLAYWRIGHT_BROWSERS_PATH`, `/opt/pw-browsers`, then common system paths). Without one the app works fully and the report page says PDF download is unavailable (print-to-PDF still works). |
 
+## Hosted demo on Vercel (optional)
+
+`api/index.js` and `vercel.json` run the same handler as a Vercel function (project root directory: `student-discovery`). Know the limits before using it:
+
+* **Keep it behind Vercel Deployment Protection** (Vercel Authentication or a password). The persona sign-in is not authentication, and the hosted build lifts the loopback-only Host check so that it can answer on a `*.vercel.app` name.
+* **State is in memory** and seeded with synthetic data when a function instance starts. Instances can start, stop or multiply at any time, so data and sign-ins can vanish and two instances can disagree. It is a place to look at the prototype, not to keep anything.
+* No Chromium there, so **Download PDF** says it is unavailable (print-to-PDF still works). Rate limits see the proxy's address, so they are shared by everyone.
+
 ## A five-minute tour
 
 | Try this | Persona | What to notice |
