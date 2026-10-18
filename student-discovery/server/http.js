@@ -115,12 +115,12 @@ async function readJson(req, limit) {
 }
 
 function send(res, status, body, extraHeaders = {}, contentType = 'application/json; charset=utf-8') {
-  const payload = body === undefined ? '' : JSON.stringify(body);
+  const payload = Buffer.isBuffer(body) ? body : body === undefined ? '' : JSON.stringify(body); // binary replies (PDF) set their own Content-Type
   res.writeHead(status, { 'Content-Type': contentType, 'Cache-Control': 'no-store', ...extraHeaders });
   res.end(payload);
 }
 
-export function createHandler({ store, config, router, sessions, clock, webRoot }) {
+export function createHandler({ store, config, router, sessions, clock, webRoot, pdf }) {
   const staticCache = new Map();
 
   function serveStatic(req, res, pathname) {
@@ -178,7 +178,8 @@ export function createHandler({ store, config, router, sessions, clock, webRoot 
   }
 
   // Idempotent replays are only honoured while nothing that could change authorization has changed.
-  const authEpoch = (db) => Object.keys(db.consent_records).length + db.guardian_links.length + db.counselor_assignments.length;
+  // Ending an assignment edits a row instead of adding one, so ended rows count as a second change.
+  const authEpoch = (db) => Object.keys(db.consent_records).length + db.guardian_links.length + db.counselor_assignments.reduce((n, a) => n + (a.ended_at ? 2 : 1), 0);
   const IDEM_TTL_MS = 10 * 60 * 1000;
   const IDEM_PER_ACTOR = 100;
 
@@ -191,7 +192,7 @@ export function createHandler({ store, config, router, sessions, clock, webRoot 
   async function handleApi(req, res, url, requestId) {
     const now = clock();
     const { route, params, pathMatched } = router.match(req.method, url.pathname);
-    const base = { requestId, now, config, store, db: store.db, actor: null };
+    const base = { requestId, now, config, store, db: store.db, actor: null, pdf };
     try {
       if (!route) {
         throw pathMatched ? new AppError(405, 'method_not_allowed', 'Method not allowed') : new AppError(404, 'not_found', 'Not found', 'No such endpoint.');
@@ -253,7 +254,10 @@ export function createHandler({ store, config, router, sessions, clock, webRoot 
         return route.handler(ctx);
       };
       const out = route.opts.tx ? store.tx(run) : run(store.db);
-      const r = out instanceof Reply ? out : new Reply(200, out);
+      // `finish` is slow work that must not hold the transaction open (rendering a PDF). It runs after the commit
+      // and receives only what the transaction chose to hand over, never a live view of the database.
+      const done = route.opts.finish ? await route.opts.finish({ ...base, db: store.db, params, query, session }, out) : out;
+      const r = done instanceof Reply ? done : new Reply(200, done);
       maintenance({ ...base, db: store.db });
       return send(res, r.status, r.body, r.headers);
     } catch (e) {

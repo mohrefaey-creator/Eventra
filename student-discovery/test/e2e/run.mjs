@@ -143,7 +143,7 @@ await step('AC-01 no consent: dashboard is locked with a clear way forward; cons
   await go(page, '/consent');
   const proc = page.locator('#sc-assessment_processing');
   assert.equal(await proc.isChecked(), false, 'nothing is pre-ticked');
-  for (const s of ['counselor_sharing', 'guardian_summary_sharing', 'advisor_explanation', 'aggregate_analytics']) assert.equal(await page.locator(`#sc-${s}`).isChecked(), false);
+  for (const s of ['counselor_sharing', 'raw_answer_sharing', 'guardian_summary_sharing', 'advisor_explanation', 'aggregate_analytics']) assert.equal(await page.locator(`#sc-${s}`).isChecked(), false);
   await proc.check();
   await page.click('#consent-form button[type=submit]');
   await page.waitForSelector('text=بالانتظار');
@@ -450,6 +450,21 @@ await step('student shares the approved report; guardian sees it only via the sh
   await g.context.close();
 });
 
+await step('approved report: Download PDF delivers a real PDF in the current language', async () => {
+  const s = a2.page;
+  await go(s, '/report');
+  await s.locator('tbody a', { hasText: 'Open' }).first().click();
+  await s.waitForSelector('header.card');
+  assert.ok(await s.locator('#pdf').count(), 'an approved report offers the PDF');
+  const [dl] = await Promise.all([s.waitForEvent('download'), s.click('#pdf')]);
+  assert.match(dl.suggestedFilename(), /^discovery-report-[0-9a-f]{8}-en\.pdf$/);
+  const file = path.join(out, 'downloaded-report.pdf');
+  await dl.saveAs(file);
+  assert.equal(fs.readFileSync(file).subarray(0, 5).toString('latin1'), '%PDF-');
+  await s.waitForFunction(() => /downloaded/i.test(document.getElementById('pdf-msg').textContent));
+  await sane(s, 'report with pdf button');
+});
+
 await step('guardian of an ADULT student: no authorization card (consent is the student\'s alone) and no access without sharing', async () => {
   const g = await newUser('user-guardian-b1', { locale: 'en' });
   await go(g.page, '/guardian');
@@ -459,6 +474,72 @@ await step('guardian of an ADULT student: no authorization card (consent is the 
   assert.equal(await g.page.locator('[data-grant]').count(), 0, 'no way to authorize or withdraw for an adult');
   assert.match(main, /No access to the summary/);
   await g.context.close();
+});
+
+await step('guardian with two children: a selector switches between them, each with its own consent and sharing state', async () => {
+  const g = await newUser('user-guardian-a12', { locale: 'en' });
+  await go(g.page, '/guardian');
+  await sane(g.page, 'two-children guardian');
+  const nav = g.page.locator('nav[aria-label="Your children"]');
+  assert.equal(await nav.locator('a').count(), 2);
+  assert.equal(await nav.locator('a[aria-current="true"]').count(), 1, 'exactly one child is marked current');
+  await nav.locator('a', { hasText: 'Demo Student A2' }).click();
+  await g.page.waitForFunction(() => location.hash.includes('student=user-student-a2'));
+  await g.page.waitForSelector('text=Progress summary');
+  assert.match(await g.page.locator('.lead').innerText(), /Demo Student A2/);
+  await nav.locator('a', { hasText: 'Demo Student A1' }).click();
+  await g.page.waitForFunction(() => location.hash.includes('student=user-student-a1'));
+  await g.page.waitForSelector('text=No access to the summary');
+  assert.match(await g.page.locator('.lead').innerText(), /Demo Student A1/);
+  await g.page.reload();
+  await g.page.waitForSelector('text=No access to the summary');
+  await g.context.close();
+});
+
+await step('conflict of interest: the counselor steps away from a student who shared nothing; the school admin reassigns; the new counselor gets the student', async () => {
+  const { page } = co;
+  await go(page, '/counselor');
+  await page.waitForSelector('table');
+  assert.equal(await page.locator('tbody tr').count(), 2);
+  await page.locator('a[href="#/counselor/away/user-student-a1"]').click(); // A1 never opened access, so Case 360 is closed; stepping away still works
+  await page.waitForSelector('#away-form');
+  await sane(page, 'step away');
+  await shot(page, 'step-away-en');
+  await page.click('#away-form button[type=submit]');
+  await page.waitForFunction(() => document.getElementById('away-msg').textContent.length > 3);
+  await page.fill('#away-reason', 'The student is a relative of mine.');
+  await page.click('#away-form button[type=submit]');
+  await page.waitForSelector('table');
+  assert.equal(await page.locator('tbody tr').count(), 1, 'the student left the counselor\'s roster at once');
+  await go(page, '/counselor/away/user-student-a1');
+  await page.waitForSelector('.card.warn[role=alert]');
+  assert.match(await page.locator('#app').innerText(), /Not found, or not available/);
+
+  const ta = await newUser('user-tenant-admin-a', { locale: 'en' });
+  await go(ta.page, '/admin/assignments');
+  await ta.page.waitForSelector('table');
+  await sane(ta.page, 'assignments');
+  let main = await ta.page.locator('main').innerText();
+  assert.match(main, /1 student\(s\) have no counselor/);
+  assert.match(main, /Demo Counselor \(School A\) stepped away/);
+  assert.ok(!/relative/.test(main), 'the reason is never shown to the school admin');
+  const row = ta.page.locator('tbody tr', { hasText: 'Demo Student A1' });
+  const options = await row.locator('select option').allInnerTexts();
+  assert.ok(!options.some((o) => o === 'Demo Counselor (School A)'), 'the counselor who stepped away cannot be chosen');
+  await row.locator('select').selectOption({ label: 'Demo Counselor 2 (School A)' });
+  await row.locator('button').click();
+  await ta.page.waitForFunction(() => document.getElementById('as-msg').textContent.length > 3);
+  await row.locator('input[name=reason]').fill('Covering after a conflict of interest');
+  await row.locator('button').click();
+  await ta.page.waitForSelector('text=Every student has a counselor.');
+  await shot(ta.page, 'assignments-en');
+  await ta.context.close();
+
+  const c2 = await newUser('user-counselor-a2', { locale: 'en' });
+  await go(c2.page, '/counselor');
+  await c2.page.waitForSelector('table');
+  assert.match(await c2.page.locator('tbody').innerText(), /Demo Student A1/);
+  await c2.context.close();
 });
 
 // ------------------------------------------------------------------ governance (English)
@@ -535,7 +616,8 @@ await step('students are bounced from staff screens; staff from student screens'
 const SWEEP = {
   'user-student-a2': ['/discover', '/consent', '/dashboard', '/evidence', '/results', '/majors', '/program/prog-demo-me', '/roadmap', '/report', '/help', '/settings'],
   'user-guardian-a2': ['/guardian'],
-  'user-counselor-a': ['/counselor', '/counselor/student/user-student-a2'],
+  'user-counselor-a': ['/counselor', '/counselor/student/user-student-a2', '/counselor/away/user-student-a2'],
+  'user-tenant-admin-a': ['/admin/assignments'],
   'user-psych-1': ['/admin/instruments'],
   'user-steward-1': ['/admin/catalog'],
   'user-security': ['/admin/control'],

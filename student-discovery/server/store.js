@@ -11,7 +11,8 @@ export function emptyDb() {
     meta: { schema_version: SCHEMA_VERSION, seeded_at: null, kill_switch: { enabled: false, reason: null, by: null, at: null } },
     users: {},
     guardian_links: [],
-    counselor_assignments: [],
+    counselor_assignments: [], // history: an ended row keeps ended_at / end_reason
+    conflicts: {}, // declared conflicts of interest (counselor stepped away from a student)
     consent_records: {},
     instrument_state: {},
     sessions: {},

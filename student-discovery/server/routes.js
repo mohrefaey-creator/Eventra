@@ -12,8 +12,10 @@ import * as counselor from './services/counselor.js';
 import * as reports from './services/reports.js';
 import * as advisor from './services/advisor.js';
 import * as admin from './services/admin.js';
+import * as assignments from './services/assignments.js';
 import { TENANTS } from './seed.js';
 import { own } from '../domain/util.js';
+import { linkActive } from './policy.js';
 
 const B = '/api/v1/discovery';
 const ID = '/api/v1/identity-stub';
@@ -31,7 +33,7 @@ const self = (ctx) => {
 function linkedStudents(ctx) {
   const { db, actor } = ctx;
   if (actor?.role !== 'guardian') return [];
-  return db.guardian_links.filter((l) => l.guardian_id === actor.id).map((l) => publicPersona(db.users[l.student_id]));
+  return db.guardian_links.filter((l) => linkActive(l, actor.id, l.student_id, ctx.now)).map((l) => publicPersona(db.users[l.student_id]));
 }
 
 const publicPersona = (u) => ({ id: u.id, role: u.role, tenant_id: u.tenant_id, display_name: u.display_name, grade: u.grade ?? null, synthetic: true });
@@ -132,6 +134,7 @@ export function registerRoutes(router, { sessions, clock }) {
   post(`${B}/students/:id/overrides`, (ctx) => reply(201, counselor.createOverride(ctx, ctx.params.id, ctx.body)));
   get(`${B}/counselor/queue`, (ctx) => counselor.counselorQueue(ctx), { tx: false });
   get(`${B}/students/:id/case360`, (ctx) => counselor.caseView(ctx, ctx.params.id, ctx.query), { tx: true });
+  post(`${B}/students/:id/conflict-of-interest`, (ctx) => assignments.declareConflict(ctx, ctx.params.id, ctx.body));
 
   // ------------------------------------------------------------ reports
   post(`${B}/students/:id/reports`, (ctx) => {
@@ -140,6 +143,10 @@ export function registerRoutes(router, { sessions, clock }) {
   });
   get(`${B}/students/:id/reports`, (ctx) => reports.listReports(ctx, ctx.params.id), { tx: true });
   get(`${B}/reports/:id`, (ctx) => reports.getReport(ctx, ctx.params.id), { tx: true });
+  get(`${B}/reports/:id/pdf`, (ctx) => reports.prepareReportPdf(ctx, ctx.params.id, ctx.query), { tx: true, finish: async (ctx, job) => {
+    const { pdf, filename } = await reports.renderReportPdf(ctx, job);
+    return reply(200, pdf, { 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${filename}"` });
+  } });
   post(`${B}/reports/:id/review-request`, (ctx) => reports.requestReview(ctx, ctx.params.id));
   post(`${B}/reports/:id/approval`, (ctx) => reports.decideReport(ctx, ctx.params.id, ctx.body));
   post(`${B}/reports/:id/shares`, (ctx) => reply(201, reports.shareReport(ctx, ctx.params.id, ctx.body ?? {})));
@@ -157,6 +164,8 @@ export function registerRoutes(router, { sessions, clock }) {
   get(`${B}/admin/program-rules`, (ctx) => admin.listRules(ctx), { tx: false });
   post(`${B}/admin/program-rules`, (ctx) => reply(201, admin.createRuleDraft(ctx, ctx.body ?? {})));
   post(`${B}/admin/program-rules/:id/publish`, (ctx) => admin.publishRule(ctx, ctx.params.id));
+  get(`${B}/admin/assignments`, (ctx) => assignments.listAssignments(ctx), { tx: false });
+  post(`${B}/admin/assignments`, (ctx) => assignments.reassign(ctx, ctx.body));
   get(`${B}/admin/control-tower`, (ctx) => admin.controlTower(ctx), { tx: false, ...during });
   get(`${B}/admin/audit`, (ctx) => admin.auditLog(ctx, ctx.query), { tx: true, ...during });
   post(`${B}/admin/kill-switch`, (ctx) => admin.setKillSwitch(ctx, ctx.body), during);

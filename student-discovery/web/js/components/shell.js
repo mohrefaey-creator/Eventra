@@ -9,7 +9,7 @@ const NAV = {
   counselor: [['counselor', 'nav.queue']],
   psychometric_lead: [['admin/instruments', 'nav.instruments'], ['admin/catalog', 'nav.catalog']],
   catalog_steward: [['admin/catalog', 'nav.catalog']],
-  tenant_admin: [['admin/control', 'nav.control']],
+  tenant_admin: [['admin/control', 'nav.control'], ['admin/assignments', 'nav.assignments']],
   platform_security: [['admin/control', 'nav.control'], ['admin/instruments', 'nav.instruments'], ['admin/catalog', 'nav.catalog']],
 };
 

@@ -7,7 +7,7 @@ import { chip } from '../components/ui.js';
 import { announce } from '../a11y.js';
 import { render } from '../router.js';
 
-const SCOPES = ['assessment_processing', 'counselor_sharing', 'guardian_summary_sharing', 'advisor_explanation', 'aggregate_analytics'];
+const SCOPES = ['assessment_processing', 'counselor_sharing', 'raw_answer_sharing', 'guardian_summary_sharing', 'advisor_explanation', 'aggregate_analytics'];
 const statusChip = (s) => chip({ active: 'ok', pending: 'warn', withdrawn: 'bad', inactive: '' }[s] ?? '', { active: '✓', pending: '…', withdrawn: '✕', inactive: '○' }[s] ?? '○', t(`consent.status.${s}`));
 
 export default async function view() {

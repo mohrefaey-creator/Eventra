@@ -15,7 +15,8 @@ export default async function view() {
           <td>${r.access === 'full' ? chip('ok', '✓', t('queue.access.full')) : chip('warn', '✕', t('queue.access.none'))}</td>
           <td><div class="chips">${r.reasons.length ? r.reasons.map((x) => chip(['safeguarding_referral', 'missing_consent'].includes(x) ? 'bad' : 'warn', '!', t(`queue.reason.${x}`))) : chip('ok', '✓', t('queue.reason.none'))}</div></td>
           <td class="num">${num(r.open_cases)}</td>
-          <td>${r.access === 'full' ? h`<a class="btn small" href="#/counselor/student/${r.student.id}?purpose=case_review">${t('queue.open')}</a>` : h`<span class="small muted">${t('queue.no_access_hint')}</span>`}</td></tr>`)}
+          <td><div class="row">${r.access === 'full' ? h`<a class="btn small" href="#/counselor/student/${r.student.id}?purpose=case_review">${t('queue.open')}</a>` : h`<span class="small muted">${t('queue.no_access_hint')}</span>`}
+            <a class="btn secondary small" href="#/counselor/away/${r.student.id}" aria-label="${t('queue.away_for', { name: loc(r.student.display_name) })}">${t('queue.away')}</a></div></td></tr>`)}
         </tbody></table></div>` : h`<div class="card empty">${t('queue.empty')}</div>`}
     </div>`,
   };

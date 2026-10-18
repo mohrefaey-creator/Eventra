@@ -7,6 +7,7 @@ import { createRouter, createSessions, createHandler } from './http.js';
 import { registerRoutes } from './routes.js';
 import { seedDatabase } from './seed.js';
 import { loadConfig, POLICY } from './config.js';
+import { createPdfRenderer } from './pdf.js';
 
 const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../web');
 
@@ -23,7 +24,8 @@ export function createApp(opts = {}) {
   const router = createRouter();
   const sessions = createSessions({ clock });
   registerRoutes(router, { sessions, clock });
-  const handler = createHandler({ store, config, router, sessions, clock, webRoot });
+  const pdf = createPdfRenderer({ chromiumPath: config.chromiumPath });
+  const handler = createHandler({ store, config, router, sessions, clock, webRoot, pdf });
   const server = http.createServer((req, res) => {
     handler(req, res).catch((e) => {
       console.error('unhandled', e);

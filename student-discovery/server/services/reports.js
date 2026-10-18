@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { audit, emit } from '../audit.js';
-import { authorize } from '../policy.js';
+import { activeAssignment, authorize } from '../policy.js';
 import { POLICY } from '../config.js';
 import { badRequest, conflict, forbidden, unprocessable } from '../errors.js';
 import { hashOf } from '../../domain/util.js';
 import { VERIFIED_STATES } from '../../domain/admission/gate.js';
+import { buildReportHtml, PDF_LOCALES } from '../reportHtml.js';
+import { pdfUnavailable } from '../pdf.js';
 import { latestScoreRuns, nextSeq, studentEvidenceMap, byId, auditCounselorRead } from './common.js';
 
 const LIMITATIONS = ['interest_unvalidated', 'no_norms_or_percentiles', 'aptitude_on_hold', 'not_an_admission_decision', 'fictional_catalog'];
@@ -106,7 +108,7 @@ export function requestReview(ctx, reportId) {
   if (r.status !== 'draft') throw conflict('report_not_draft', `Report is ${r.status}.`);
   r.status = 'review_requested';
   r.review_requested_at = ctx.now.toISOString();
-  const assignee = db.counselor_assignments.find((a) => a.student_id === r.student_id)?.counselor_id ?? null;
+  const assignee = activeAssignment(db, r.student_id)?.counselor_id ?? null;
   const caseId = randomUUID();
   db.cases[caseId] = { id: caseId, seq: nextSeq(db.cases), tenant_id: r.tenant_id, student_id: r.student_id, reason_code: 'report_review', status: 'open', opened_by: { id: ctx.actor.id, role: ctx.actor.role }, assignee_id: assignee, student_message: null, subject_ref: `report:${r.id}`, created_at: r.review_requested_at, updated_at: r.review_requested_at, resolved_at: null, resolution: null, next_review_at: null };
   audit(ctx, { action: 'report.review_requested', tenant_id: r.tenant_id, subject_ref: `report:${r.id}`, after: { payload_hash: r.payload_hash } });
@@ -214,4 +216,43 @@ export function revokeShare(ctx, shareId) {
     audit(ctx, { action: 'report.share_revoked', tenant_id: s.tenant_id, subject_ref: `report:${s.report_id}`, after: { share_id: s.id } });
   }
   return s;
+}
+
+// ---------------------------------------------------------------- PDF export (approved reports only)
+
+/**
+ * Phase one, inside the transaction: authorize exactly like reading the report, require approval, record the
+ * export, and hand over the page to print. Rendering happens afterwards (see the route's `finish`).
+ * Nothing user-specific is printed, so the same approved content and language always produce the same file.
+ */
+export function prepareReportPdf(ctx, reportId, query) {
+  const locale = query?.locale ?? 'ar-SA';
+  if (!PDF_LOCALES.includes(locale)) throw badRequest('invalid_locale', `locale must be one of: ${PDF_LOCALES.join(', ')}`);
+  const view = getReport(ctx, reportId); // same authorization as the screen: owner, assigned counselor with consent, or a guardian through an active share
+  if (view.status !== 'approved') throw conflict('report_not_approved', 'Only a counselor-approved report can be exported as PDF.');
+  if (!ctx.pdf?.available()) throw pdfUnavailable();
+  const tenant_id = ctx.db.reports[view.id].tenant_id;
+  audit(ctx, { action: 'report.exported', tenant_id, subject_ref: `report:${view.id}`, after: { payload_hash: view.payload_hash }, meta: { format: 'pdf', locale } });
+  return {
+    report_id: view.id,
+    tenant_id,
+    locale,
+    html: buildReportHtml(view, locale),
+    cache_key: `${view.id}:${view.payload_hash}:${view.approval.id}:${locale}`,
+    filename: `discovery-report-${view.id.slice(0, 8)}-${locale === 'en' ? 'en' : 'ar'}.pdf`,
+  };
+}
+
+/** Phase two, after the commit. A failed render is recorded; the caller still sees the problem. */
+export async function renderReportPdf(ctx, job) {
+  try {
+    return { pdf: await ctx.pdf.render(job.html, job.cache_key), filename: job.filename };
+  } catch (e) {
+    try {
+      ctx.store.tx((db) => audit({ ...ctx, db }, { action: 'report.export_failed', tenant_id: job.tenant_id, subject_ref: `report:${job.report_id}`, meta: { format: 'pdf', status: e.status ?? 500 } }));
+    } catch (auditErr) {
+      console.error('audit of failed export failed', auditErr);
+    }
+    throw e;
+  }
 }

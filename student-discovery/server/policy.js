@@ -110,7 +110,8 @@ const RULES = {
   'session.create': { student: 'assessment_processing' },
   'session.write': { student: 'assessment_processing' },
   'session.read': { student: null },
-  'responses.read_raw': { student: null, counselor: 'counselor_sharing' },
+  // Individual answers are a separate visibility class from scored results: the student opts in to each.
+  'responses.read_raw': { student: null, counselor: ['counselor_sharing', 'raw_answer_sharing'] },
   'score.read': { student: null, counselor: 'counselor_sharing' },
   'score.replay': { student: null, counselor: 'counselor_sharing' },
   'recommendation.create': { student: 'assessment_processing' },
@@ -131,7 +132,11 @@ const RULES = {
   'journey.read': { student: null },
 };
 
-const linkActive = (l, actorId, studentId, now) => l.guardian_id === actorId && l.student_id === studentId && !l.revoked_at && (!l.expires_at || new Date(l.expires_at) > now);
+export const linkActive = (l, actorId, studentId, now) => l.guardian_id === actorId && l.student_id === studentId && !l.revoked_at && (!l.expires_at || new Date(l.expires_at) > now);
+
+// An assignment row is history once it has ended; only the open one gives a counselor access.
+export const activeAssignment = (db, studentId) => db.counselor_assignments.find((a) => a.student_id === studentId && !a.ended_at) ?? null;
+export const isAssigned = (db, counselorId, studentId) => db.counselor_assignments.some((a) => a.counselor_id === counselorId && a.student_id === studentId && !a.ended_at);
 
 /**
  * Authorize `ctx.actor` for `intent` on `studentId`. Returns { student, consent }.
@@ -156,9 +161,7 @@ export function authorize(ctx, studentId, intent) {
     // A guardian decides only for a minor; for an adult student consent belongs to the student alone.
     if ((intent === 'consent.read' || intent === 'consent.write') && !guardianRequired(student, ctx.now)) deny(ctx, student, 'guardian_not_applicable', undefined, 'not_available');
   }
-  if (actor.role === 'counselor' && !db.counselor_assignments.some((a) => a.counselor_id === actor.id && a.student_id === studentId)) {
-    deny(ctx, student, 'not_assigned_counselor', undefined, 'not_available');
-  }
+  if (actor.role === 'counselor' && !isAssigned(db, actor.id, studentId)) deny(ctx, student, 'not_assigned_counselor', undefined, 'not_available');
 
   const consent = consentState(db, studentId, ctx.now);
   const needScopes = [].concat(rule[actor.role] ?? []);

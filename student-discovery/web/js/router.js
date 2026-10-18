@@ -28,9 +28,11 @@ const ROUTES = [
   ['/guardian', () => import('./views/guardian.js'), ['guardian']],
   ['/counselor', () => import('./views/counselorQueue.js'), ['counselor']],
   ['/counselor/student/:id', () => import('./views/case360.js'), ['counselor']],
+  ['/counselor/away/:id', () => import('./views/counselorAway.js'), ['counselor']],
   ['/admin/instruments', () => import('./views/adminInstruments.js'), ['psychometric_lead', 'platform_security']],
   ['/admin/catalog', () => import('./views/adminCatalog.js'), ['catalog_steward', 'psychometric_lead', 'platform_security']],
   ['/admin/control', () => import('./views/control.js'), ['tenant_admin', 'platform_security']],
+  ['/admin/assignments', () => import('./views/adminAssignments.js'), ['tenant_admin']],
 ].map(([pattern, loader, roles]) => {
   const keys = [];
   const re = new RegExp(`^${pattern.replace(/:([a-z]+)/g, (_, k) => (keys.push(k), '([^/]+)'))}$`);

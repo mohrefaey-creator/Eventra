@@ -1,6 +1,6 @@
 import { h } from '../html.js';
-import { get, post, del, BASE } from '../api.js';
-import { t, loc } from '../i18n.js';
+import { get, post, del, download, BASE } from '../api.js';
+import { t, loc, getLocale } from '../i18n.js';
 import { role } from '../state.js';
 import { num, date, shortHash } from '../format.js';
 import { bars, eligibilityChip, sourceChip } from '../components/ui.js';
@@ -29,8 +29,9 @@ export default async function view({ params }) {
   return {
     title: t('report.title'),
     body: h`<div class="stack">
-      <div class="row between no-print"><p class="small"><a href="#/${me === 'student' ? 'report' : me === 'guardian' ? 'guardian' : `counselor/student/${r.student_id}`}">← ${t('common.back')}</a></p>
-        <button class="btn secondary" type="button" id="print">${t('report.print')}</button></div>
+      <div class="row between no-print"><p class="small"><a href="#/${me === 'student' ? 'report' : me === 'guardian' ? `guardian?student=${r.student_id}` : `counselor/student/${r.student_id}`}">← ${t('common.back')}</a></p>
+        <div class="row">${r.status === 'approved' ? h`<button class="btn" type="button" id="pdf">${t('report.pdf.download')}</button>` : ''}<button class="btn secondary" type="button" id="print">${t('report.print')}</button></div></div>
+      <p id="pdf-msg" class="small no-print" role="status"></p>
       <div class="watermark-wrap stack" ${r.watermark ? h`data-watermark="${t('report.watermark')}"` : ''}>
         <header class="card accent"><h1>${t('report.title')}</h1>
           <p><bdi>${loc(p.student.display_name)}</bdi> · ${t('common.grade', { n: p.student.grade })} · ${reportChip(r.status)}</p>
@@ -63,6 +64,26 @@ export default async function view({ params }) {
     </div>`,
     after(root) {
       root.querySelector('#print').addEventListener('click', () => window.print());
+      root.querySelector('#pdf')?.addEventListener('click', async (e) => {
+        const btn = e.currentTarget;
+        const msg = root.querySelector('#pdf-msg');
+        btn.disabled = true;
+        msg.textContent = t('report.pdf.preparing');
+        try {
+          const { blob, name } = await download(`${BASE}/reports/${r.id}/pdf?locale=${encodeURIComponent(getLocale())}`);
+          const url = URL.createObjectURL(blob);
+          const a = Object.assign(document.createElement('a'), { href: url, download: name });
+          document.body.append(a);
+          a.click();
+          a.remove();
+          setTimeout(() => URL.revokeObjectURL(url), 10000);
+          msg.textContent = t('report.pdf.saved');
+        } catch (err) {
+          msg.textContent = { pdf_unavailable: t('report.pdf.unavailable'), pdf_busy: t('report.pdf.busy') }[err.code] ?? t('report.pdf.failed');
+        } finally {
+          btn.disabled = false;
+        }
+      });
       root.querySelector('#review')?.addEventListener('click', async () => {
         await post(`${BASE}/reports/${r.id}/review-request`, {});
         announce(t('report.review_sent'));

@@ -18,6 +18,7 @@ export const POLICY = Object.freeze({
 export const CONSENT_SCOPES = Object.freeze({
   assessment_processing: Object.freeze({ required: true }),
   counselor_sharing: Object.freeze({ required: false }),
+  raw_answer_sharing: Object.freeze({ required: false }), // a distinct visibility class (spec §11.7)
   guardian_summary_sharing: Object.freeze({ required: false }),
   advisor_explanation: Object.freeze({ required: false }),
   aggregate_analytics: Object.freeze({ required: false }),
@@ -32,5 +33,7 @@ export function loadConfig(env = process.env) {
     syntheticMode: env.SYNTHETIC_MODE !== 'false',
     // The persona stand-in is not authentication. Serving non-loopback hosts must be an explicit, loud opt-in.
     allowAnyHost: env.ALLOW_NETWORK_HOST === 'true',
+    // Optional: PDF export needs an installed Chromium/Chrome. Without one the export route answers 501.
+    chromiumPath: env.CHROMIUM_PATH || null,
   };
 }

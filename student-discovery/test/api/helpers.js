@@ -30,14 +30,15 @@ function client(origin, cookie, csrf) {
     const headers = { ...(cookie ? { cookie } : {}), ...(csrf && method !== 'GET' ? { 'x-csrf-token': csrf } : {}), ...extra };
     if (body !== undefined) headers['content-type'] = 'application/json';
     const res = await fetch(`${origin}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
-    const text = await res.text();
+    const buf = Buffer.from(await res.arrayBuffer()); // binary replies (PDF) must not pass through a string
+    const text = buf.toString('utf8');
     let json = null;
     try {
       json = text ? JSON.parse(text) : null;
     } catch {
       /* non-JSON */
     }
-    return { status: res.status, body: json, headers: res.headers, text };
+    return { status: res.status, body: json, headers: res.headers, text, buf };
   }
   return {
     get: (p, h) => call('GET', p, undefined, h),
@@ -70,7 +71,7 @@ export async function answerAll(c, sessionId, instrumentId, fn, { submit = true,
 
 export const grantAll = async (student, guardian) => {
   const id = (await student.get('/api/v1/identity-stub/me')).body.persona.id;
-  for (const scope of ['assessment_processing', 'counselor_sharing', 'guardian_summary_sharing', 'advisor_explanation', 'aggregate_analytics']) {
+  for (const scope of ['assessment_processing', 'counselor_sharing', 'raw_answer_sharing', 'guardian_summary_sharing', 'advisor_explanation', 'aggregate_analytics']) {
     const r = await student.post(`${BASE}/students/${id}/consent`, { scope, granted: true });
     if (r.status !== 200) throw new Error(`grant ${scope}: ${r.status} ${r.text}`);
   }

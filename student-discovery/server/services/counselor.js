@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { audit } from '../audit.js';
-import { authorize, consentState, requireRole } from '../policy.js';
+import { activeAssignment, authorize, consentState, requireRole } from '../policy.js';
 import { badRequest, notFound, unprocessable } from '../errors.js';
 import { VERIFIED_STATES } from '../../domain/admission/gate.js';
 import { discoveryProfile } from './student.js';
@@ -38,7 +38,7 @@ export function openCase(ctx, studentId, body) {
   if (!allowed.includes(reason)) throw badRequest('invalid_reason', `reason_code must be one of: ${allowed.join(', ')}`);
   const message = clean(body?.message, 2000);
   if (actor.role === 'student' && reason !== 'help_request' && message.length < 3) throw unprocessable('message_required', 'Tell your counselor briefly what you would like reviewed.');
-  const assignee = db.counselor_assignments.find((a) => a.student_id === studentId)?.counselor_id ?? null;
+  const assignee = activeAssignment(db, studentId)?.counselor_id ?? null;
   const c = {
     id: randomUUID(),
     seq: nextSeq(db.cases),
@@ -142,7 +142,7 @@ export function createOverride(ctx, studentId, body) {
 export function counselorQueue(ctx) {
   const { db, actor } = ctx;
   requireRole(ctx, 'counselor');
-  const assigned = db.counselor_assignments.filter((a) => a.counselor_id === actor.id).map((a) => db.users[a.student_id]).filter((u) => u && u.tenant_id === actor.tenant_id);
+  const assigned = db.counselor_assignments.filter((a) => a.counselor_id === actor.id && !a.ended_at).map((a) => db.users[a.student_id]).filter((u) => u && u.tenant_id === actor.tenant_id);
   const rows = assigned.map((st) => {
     const consent = consentState(db, st.id, ctx.now);
     const openCases = Object.values(db.cases).filter((c) => c.student_id === st.id && c.status !== 'resolved');

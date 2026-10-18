@@ -24,7 +24,8 @@ export default async function view({ params, query }) {
   const panels = {
     overview: h`<div class="grid two"><section class="card"><h3>${t('c360.modules')}</h3><ul>${P.modules.map((m) => h`<li>${loc(m.name)} ${moduleChip(m.status)} <span class="small muted">(${num(m.attempts)} ${t('c360.attempts')})</span></li>`)}</ul></section>
       <section class="card"><h3>${t('c360.consent')}</h3><ul>${Object.entries(P.consent.scopes).map(([k, v]) => h`<li>${t(`scope.${k}.title`)}: ${chip(v.active ? 'ok' : 'warn', v.active ? '✓' : '○', t(`consent.status.${v.status}`))}</li>`)}</ul></section></div>
-      <section class="card"><h3>${t('c360.completeness')}</h3><p>${t('results.completeness.modules', { a: num(P.completeness.modules_sealed), b: num(P.completeness.modules_total) })} · ${t('results.completeness.evidence', { a: num(P.completeness.academic_evidence_present), b: num(P.completeness.academic_evidence_total), v: num(P.completeness.academic_evidence_verified) })}</p></section>`,
+      <section class="card"><h3>${t('c360.completeness')}</h3><p>${t('results.completeness.modules', { a: num(P.completeness.modules_sealed), b: num(P.completeness.modules_total) })} · ${t('results.completeness.evidence', { a: num(P.completeness.academic_evidence_present), b: num(P.completeness.academic_evidence_total), v: num(P.completeness.academic_evidence_verified) })}</p></section>
+      <section class="card"><h3>${t('c360.away.title')}</h3><p class="small muted">${t('c360.away.note')}</p><a class="btn secondary small" href="#/counselor/away/${sid}">${t('c360.away.open')}</a></section>`,
 
     results: h`${interestRun.status === 'sealed' ? h`<section class="card"><h3>${t('results.interests.title')}</h3>
       ${bars(DIMS.map((x) => ({ x, c: interestRun.construct_scores[`RIASEC_${x}`] })).map(({ x, c }) => ({ label: t(`dim.${x}.name`), value: c.status === 'ok' ? c.display_0_100 : null, valueText: c.status === 'ok' ? num(c.display_0_100) : '' })))}
@@ -159,8 +160,16 @@ export default async function view({ params, query }) {
       });
       root.querySelectorAll('[data-raw]').forEach((b) =>
         b.addEventListener('click', async () => {
-          const r = await get(`${BASE}/sessions/${b.dataset.raw}/responses`);
           const out = root.querySelector('#raw-out');
+          let r;
+          try {
+            r = await get(`${BASE}/sessions/${b.dataset.raw}/responses`);
+          } catch (err) {
+            if (err.status !== 403) throw err;
+            mount(out, h`<div class="card warn" role="alert">${t('c360.raw.no_consent')}</div>`);
+            announce(t('c360.raw.no_consent'), true);
+            return;
+          }
           mount(out, h`<div class="table-wrap"><table><thead><tr><th>${t('c360.raw.item')}</th><th class="num">${t('c360.raw.value')}</th></tr></thead><tbody>${r.answers.map((a) => h`<tr><td>${loc(a.content)} <code class="muted">${a.item_id}</code></td><td class="num">${a.value ?? '—'}</td></tr>`)}</tbody></table></div>`);
           announce(t('c360.raw.logged'));
         }),

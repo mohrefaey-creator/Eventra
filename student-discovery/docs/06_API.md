@@ -30,7 +30,7 @@ Machine-readable OpenAPI is **not** produced (deviation 6 in `00`); this table i
 | `PUT /sessions/:id/responses/:itemId` | `session.write` – student + processing | Save one typed response (server-validated; revisions) |
 | `POST /sessions/:id/submit` | `session.write` | Seal and score. `acknowledge_incomplete` needed if unanswered. Duplicate/concurrent submit → one result (`already_submitted`) |
 | `GET /sessions/:id/score` | `score.read` – student, counselor + `counselor_sharing` | Scores, ranking, provenance, signed notes (student sees only student-visible) |
-| `GET /sessions/:id/responses` | `responses.read_raw` – student, counselor + sharing. **Guardian: never** | Raw answers; counselor reads are audited |
+| `GET /sessions/:id/responses` | `responses.read_raw` – student; counselor needs `counselor_sharing` **and** the separate `raw_answer_sharing` scope. **Guardian: never** | Raw answers are a separate visibility class from scored results; counselor reads are audited |
 | `POST /sessions/:id/replay` | `score.replay` | Recompute from sealed answers and compare hashes |
 
 ## Student data
@@ -66,8 +66,9 @@ Machine-readable OpenAPI is **not** produced (deviation 6 in `00`); this table i
 | `PATCH /cases/:id` | `case.review` – counselor | `in_review` / `resolved` (resolution required) |
 | `POST /students/:id/notes` | `case.review` | Counselor note (`counselor_only` or `student` visibility) |
 | `POST /students/:id/overrides` | `override.create` | Signed interpretation note over a sealed score (reason ≥ 10 chars). Never changes answers or scores |
-| `GET /counselor/queue` | counselor | Assigned students and reasons; no data peeking without consent |
-| `GET /students/:id/case360` | `case.review` | Bundle for review. `?purpose=` must be one of `case_review`, `parent_inquiry`, `appeal_review`, `follow_up`, `safeguarding`; the read is audited |
+| `GET /counselor/queue` | counselor | Currently assigned students (ended assignments excluded) and reasons; no data peeking without consent |
+| `GET /students/:id/case360` | `case.review` | Bundle for review. `?purpose=` must be one of `case_review`, `parent_inquiry`, `appeal_review`, `follow_up`, `safeguarding`; the read is audited. Raw answers are not part of it (separate scope) |
+| `POST /students/:id/conflict-of-interest` | the **currently assigned** counselor only (anyone else: 403 `not_available`); no student consent needed, because stepping away only removes access | Declare a conflict (`reason` ≥ 10 chars). The assignment ends at once, open cases become unowned, and the counselor is barred from being assigned to this student again. The reason is kept with the conflict record, never in the audit log or any list |
 
 ## Reports
 | Route | Authorization | Purpose |
@@ -75,6 +76,7 @@ Machine-readable OpenAPI is **not** produced (deviation 6 in `00`); this table i
 | `POST /students/:id/reports` | `report.generate` – **student only** | Build a report payload (identical content → same report) |
 | `GET /students/:id/reports` | `report.read` | List |
 | `GET /reports/:id` | student, counselor; guardian only via an unexpired share + consent | View; `watermark: "DRAFT"` until approved |
+| `GET /reports/:id/pdf` | Same as `GET /reports/:id` (owner; assigned counselor + `counselor_sharing`; guardian only through an active share), **and** the report must be approved (409 `report_not_approved`) | Tagged PDF (`?locale=ar-SA` default, or `en`; anything else 400). Rendered by an installed Chromium/Chrome after the transaction commits; without one: 501 `pdf_unavailable`; a failed render: 502 `pdf_failed` (recorded as `report.export_failed`); too many at once: 429 `pdf_busy`. Every download is audited as `report.exported`. Nothing about the downloader is printed, so identical approved content and language give an identical (cached) file |
 | `POST /reports/:id/review-request` | `report.generate` | Ask the counselor to review |
 | `POST /reports/:id/approval` | `report.approve` – counselor | `approve`/`reject` bound to the exact `payload_hash` (mismatch → 409); the stored content is re-hashed first; the approver can never be the creator (403 `separation_of_duties`) |
 | `POST /reports/:id/shares` | `report.share` – student + `guardian_summary_sharing` | Share an approved report with the guardian for 1–90 days |
@@ -96,6 +98,8 @@ Machine-readable OpenAPI is **not** produced (deviation 6 in `00`); this table i
 | `GET /admin/program-rules` | steward, psychometric lead, security | Rules, drafts, versions, source state |
 | `POST /admin/program-rules` | steward | Draft a rule (source, dates, conditions mandatory) |
 | `POST /admin/program-rules/:id/publish` | steward **other than the author** | Verify and publish; supersedes the previous version |
+| `GET /admin/assignments` | tenant admin (own school) | Students (unassigned first) with their counselor and who declared a conflict, plus counselors with load. No student content, no conflict reason |
+| `POST /admin/assignments` | tenant admin (own school) | `{student_id, counselor_id, reason}`. Counselor must be of the same school (422 `counselor_other_school`) and must not have declared a conflict for that student (409 `conflict_of_interest`). Ends the old assignment (history kept), moves open cases, repeating the same assignment returns `changed:false` |
 | `GET /admin/control-tower` | tenant admin (own school), security | Aggregates with small-cell suppression |
 | `GET /admin/audit` | security | Audit events (filter by action prefix) with chain verification; the read is itself audited |
 | `POST /admin/kill-switch` | security | Suspend/resume the whole module (fail closed, 503) |
@@ -103,7 +107,7 @@ Machine-readable OpenAPI is **not** produced (deviation 6 in `00`); this table i
 ## Events (outbox)
 `discovery.session.started`, `discovery.session.submitted`, `discovery.score.ready`, `discovery.profile.updated`,
 `discovery.recommendation.generated`, `discovery.report.review_requested`, `discovery.report.approved`,
-`discovery.consent.granted`, `discovery.consent.withdrawn`, `discovery.instrument.suspended`,
+`discovery.consent.granted`, `discovery.consent.withdrawn`, `discovery.assignment.conflict_declared`, `discovery.assignment.changed`, `discovery.instrument.suspended`,
 `catalog.admission_rule.published`, `catalog.admission_rule.expired`.
 Payloads carry ids and states only, plus schema version, correlation id and actor. Delivery is at-least-once; the
 journey consumer is idempotent.

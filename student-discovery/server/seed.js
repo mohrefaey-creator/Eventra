@@ -35,7 +35,9 @@ function personas(now) {
     u('user-guardian-a1', 'guardian', 'school-a', 'ولي أمر تجريبي أ١', 'Demo Guardian A1'),
     u('user-guardian-a2', 'guardian', 'school-a', 'ولي أمر تجريبي أ٢', 'Demo Guardian A2'),
     u('user-guardian-b1', 'guardian', 'school-b', 'ولي أمر تجريبي ب١', 'Demo Guardian B1'),
+    u('user-guardian-a12', 'guardian', 'school-a', 'ولي أمر تجريبي (طالبان)', 'Demo Guardian (two children)'),
     u('user-counselor-a', 'counselor', 'school-a', 'مرشد تجريبي (المدرسة أ)', 'Demo Counselor (School A)'),
+    u('user-counselor-a2', 'counselor', 'school-a', 'مرشد تجريبي ثانٍ (المدرسة أ)', 'Demo Counselor 2 (School A)'),
     u('user-counselor-b', 'counselor', 'school-b', 'مرشد تجريبي (المدرسة ب)', 'Demo Counselor (School B)'),
     u('user-steward-1', 'catalog_steward', 'platform', 'مسؤول كتالوج تجريبي ١', 'Demo Catalog Steward 1'),
     u('user-steward-2', 'catalog_steward', 'platform', 'مسؤول كتالوج تجريبي ٢', 'Demo Catalog Steward 2'),
@@ -76,11 +78,14 @@ export function seedDatabase(store, now) {
       { guardian_id: 'user-guardian-a1', student_id: 'user-student-a1' },
       { guardian_id: 'user-guardian-a2', student_id: 'user-student-a2' },
       { guardian_id: 'user-guardian-b1', student_id: 'user-student-b1' },
+      { guardian_id: 'user-guardian-a12', student_id: 'user-student-a1' },
+      { guardian_id: 'user-guardian-a12', student_id: 'user-student-a2' },
     );
+    const assigned_at = new Date(+now - 30 * DAY).toISOString();
     db.counselor_assignments.push(
-      { counselor_id: 'user-counselor-a', student_id: 'user-student-a1' },
-      { counselor_id: 'user-counselor-a', student_id: 'user-student-a2' },
-      { counselor_id: 'user-counselor-b', student_id: 'user-student-b1' },
+      { counselor_id: 'user-counselor-a', student_id: 'user-student-a1', assigned_at, assigned_by: null },
+      { counselor_id: 'user-counselor-a', student_id: 'user-student-a2', assigned_at, assigned_by: null },
+      { counselor_id: 'user-counselor-b', student_id: 'user-student-b1', assigned_at, assigned_by: null },
     );
     for (const p of PROGRAMS) db.programs[p.program_id] = { program_id: p.program_id, status: p.status };
     for (const r of buildSeedRuleSnapshots(now, randomUUID)) db.rule_snapshots[r.id] = r;
@@ -92,7 +97,7 @@ export function seedDatabase(store, now) {
 
   // ---- consent: A2 fully consented (student + guardian), B1 (adult) consented, A1 intentionally none
   seedTx(() => {
-    for (const scope of ['assessment_processing', 'counselor_sharing', 'guardian_summary_sharing', 'advisor_explanation', 'aggregate_analytics']) setConsent(as('user-student-a2'), 'user-student-a2', { scope, granted: true });
+    for (const scope of ['assessment_processing', 'counselor_sharing', 'raw_answer_sharing', 'guardian_summary_sharing', 'advisor_explanation', 'aggregate_analytics']) setConsent(as('user-student-a2'), 'user-student-a2', { scope, granted: true });
     setConsent(as('user-guardian-a2'), 'user-student-a2', { scope: 'assessment_processing', granted: true });
     for (const scope of ['assessment_processing', 'counselor_sharing', 'aggregate_analytics']) setConsent(as('user-student-b1'), 'user-student-b1', { scope, granted: true });
   });

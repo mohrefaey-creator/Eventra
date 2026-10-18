@@ -99,7 +99,7 @@ test('dynamic key families cover every domain enumeration the UI can emit', () =
   for (const k of Object.keys(VALUES)) need.push(`value.${k}`);
   for (const k of Object.keys(PATHWAYS)) need.push(`pathway.${k}`);
   for (const i of INSTRUMENTS) for (const k of Object.keys(i.governance.validation)) need.push(`instr.val.${k}`);
-  for (const k of ['assessment_processing', 'counselor_sharing', 'guardian_summary_sharing', 'advisor_explanation', 'aggregate_analytics']) need.push(`scope.${k}.title`, `scope.${k}.body`);
+  for (const k of ['assessment_processing', 'counselor_sharing', 'raw_answer_sharing', 'guardian_summary_sharing', 'advisor_explanation', 'aggregate_analytics']) need.push(`scope.${k}.title`, `scope.${k}.body`);
   for (const k of ['verified_current', 'stale', 'conflicting', 'none', 'not_published']) need.push(`source.${k}`);
   for (const k of ['met', 'not_met', 'unknown', 'unverified_met', 'unverified_not_met']) need.push(`cond.${k}`);
   for (const k of ['not_evaluated', 'source_conflict', 'source_stale', 'ineligible', 'missing_evidence', 'needs_verification', 'eligible']) need.push(`adm.msg.${k}`);

@@ -8,8 +8,9 @@ import { reportChip } from './reports.js';
 import { render } from '../router.js';
 import { announce } from '../a11y.js';
 
-export default async function view() {
-  const child = state.me.linked_students?.[0];
+export default async function view({ query }) {
+  const kids = state.me.linked_students ?? [];
+  const child = kids.find((k) => k.id === query.student) ?? kids[0];
   if (!child) return { title: t('guardian.title'), body: h`<div class="stack"><h1>${t('guardian.title')}</h1>${notice('warn', h`<p>${t('guardian.no_child')}</p>`)}</div>` };
   // For an adult student the guardian has no say in consent (the server answers 403); they only see what is shared.
   let consent = null;
@@ -31,6 +32,7 @@ export default async function view() {
   return {
     title: t('guardian.title'),
     body: h`<div class="stack"><h1>${t('guardian.title')}</h1>
+      ${kids.length > 1 ? h`<nav aria-label="${t('guardian.children')}"><ul class="chips">${kids.map((k) => h`<li class="chips"><a class="btn ${k.id === child.id ? '' : 'secondary'} small" href="#/guardian?student=${k.id}" ${k.id === child.id ? h`aria-current="true"` : ''}><bdi>${loc(k.display_name)}</bdi></a></li>`)}</ul></nav>` : ''}
       <p class="lead">${t('guardian.lead', { name: loc(child.display_name) })}</p>
       ${proc ? h`      <section class="card accent" aria-labelledby="g-auth"><h2 id="g-auth">${t('guardian.auth.title')}</h2>
         <p>${t('guardian.auth.body')}</p>

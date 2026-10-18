@@ -41,6 +41,29 @@ export async function api(method, path, body, headers = {}) {
   return { data, headers: res.headers, status: res.status };
 }
 
+/** Binary download (PDF). Problems come back as the same ApiError as everywhere else. */
+export async function download(path) {
+  let res;
+  try {
+    res = await fetch(path, { credentials: 'same-origin' });
+  } catch (e) {
+    const err = new ApiError(0, { code: 'network', detail: 'Network unavailable' });
+    err.cause = e;
+    throw err;
+  }
+  if (!res.ok) {
+    let data = null;
+    try {
+      data = JSON.parse(await res.text());
+    } catch {
+      /* not a problem document */
+    }
+    throw new ApiError(res.status, data);
+  }
+  const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? 'report.pdf';
+  return { blob: await res.blob(), name };
+}
+
 export const get = async (p) => (await api('GET', p)).data;
 export const post = async (p, b = {}) => (await api('POST', p, b)).data;
 export const put = async (p, b = {}, h) => api('PUT', p, b, h);
