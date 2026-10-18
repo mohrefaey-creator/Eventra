@@ -26,7 +26,7 @@ export default async function view({ query }) {
         <section class="card"><h2>${t('ct.instruments')}</h2><ul>${k.instruments.map((i) => h`<li><code>${i.instrument_id}</code> ${chip(i.suspended ? 'bad' : '', i.suspended ? '⏸' : '•', i.suspended ? t('instr.suspended') : t(`instr.state.${i.state}`))}</li>`)}</ul></section>
         <section class="card"><h2>${t('ct.security')}</h2><dl class="kv"><dt>${t('ct.denied')}</dt><dd><strong>${num(k.security.access_denied_total)}</strong></dd><dt>${t('ct.denied_consent')}</dt><dd><strong>${num(k.security.no_consent_denials)}</strong></dd></dl></section>
         <section class="card"><h2>${t('ct.ops')}</h2><dl class="kv"><dt>${t('ct.audit_events')}</dt><dd><strong>${num(k.operations.audit_events)}</strong></dd>
-          <dt>${t('ct.audit_chain')}</dt><dd>${k.operations.audit_chain.ok ? chip('ok', '✓', t('ct.chain_ok')) : chip('bad', '✕', t('ct.chain_broken', { n: k.operations.audit_chain.broken_at_seq }))}</dd>
+          ${k.operations.audit_chain ? h`<dt>${t('ct.audit_chain')}</dt><dd>${k.operations.audit_chain.ok ? chip('ok', '✓', t('ct.chain_ok')) : chip('bad', '✕', t('ct.chain_broken', { n: k.operations.audit_chain.broken_at_seq }))}</dd>` : ''}
           <dt>${t('ct.outbox_pending')}</dt><dd><strong>${num(k.operations.outbox_pending)}</strong></dd><dt>${t('ct.outbox_retry')}</dt><dd><strong>${num(k.operations.outbox_retrying)}</strong></dd></dl></section>
       </div>
       <section class="card" aria-labelledby="mods"><h2 id="mods">${t('ct.modules')}</h2>

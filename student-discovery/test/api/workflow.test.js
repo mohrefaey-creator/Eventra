@@ -28,13 +28,13 @@ test('counselor queue shows reasons, hides data when consent is missing, and is 
 
 test('Case 360 bundles evidence and provenance, records an access-reason audit event, and is blocked without consent', async () => {
   const c = await app.as('user-counselor-a');
-  const r = await c.get(`${BASE}/students/${A2}/case360?purpose=${encodeURIComponent('weekly review')}`);
+  const r = await c.get(`${BASE}/students/${A2}/case360?purpose=follow_up`);
   assert.equal(r.status, 200);
   assert.ok(r.body.profile.panels.expressed_interests.score_run_id);
   assert.ok(r.body.evidence.history.length >= 5);
   assert.ok(r.body.notes.some((n) => n.visibility === 'counselor_only'));
   const ev = app.store.db.audit.filter((e) => e.action === 'access.case360').at(-1);
-  assert.equal(ev.meta.purpose, 'weekly review');
+  assert.equal(ev.meta.purpose, 'follow_up');
   assert.equal(ev.actor.id, 'user-counselor-a');
   assert.equal((await c.get(`${BASE}/students/user-student-a1/case360`)).status, 403);
 });
@@ -82,7 +82,7 @@ test('AC-17 a student can challenge a suggestion and ask for review; a counselor
   const c = await app.as('user-counselor-a');
   assert.equal((await s.post(`${BASE}/students/${A2}/cases`, { reason_code: 'appeal', message: '' })).status, 422);
   assert.equal((await s.post(`${BASE}/students/${A2}/cases`, { reason_code: 'safeguarding_referral', message: 'x' })).status, 400, 'students use student reasons');
-  const open = await s.post(`${BASE}/students/${A2}/counselor-review`, { reason_code: 'interpretation_dispute', message: 'I do not think my Social score reflects me.', subject_ref: 'score_run:abc' });
+  const open = await s.post(`${BASE}/students/${A2}/counselor-review`, { reason_code: 'interpretation_dispute', message: 'I do not think my Social score reflects me.', subject_ref: `score_run:${Object.values(app.store.db.score_runs).find((x) => x.student_id === A2).id}` });
   assert.equal(open.status, 201);
   assert.equal(open.body.status, 'open');
   assert.equal(open.body.assignee_id, 'user-counselor-a');
@@ -270,7 +270,9 @@ test('control tower: small cohorts are suppressed; roles are enforced; tenant ad
   assert.equal(r.body.cohort.opted_in_students.value, null);
   assert.ok(r.body.modules.every((m) => m.started.suppressed && m.median_completion_seconds.suppressed));
   assert.equal(r.body.catalog_freshness.programs, 15);
-  assert.equal(r.body.operations.audit_chain.ok, true);
+  assert.equal(r.body.operations.audit_chain, null, 'the platform-wide audit chain status is for the security role');
+  assert.equal(r.body.incident_mode.reason, null);
+  assert.equal((await (await app.as('user-security')).get(`${BASE}/admin/control-tower`)).body.operations.audit_chain.ok, true);
   assert.equal(JSON.stringify(r.body).includes('user-student'), false, 'no identifiers in aggregates');
   assert.equal((await (await app.as(A2)).get(`${BASE}/admin/control-tower`)).status, 403);
   assert.equal((await (await app.as('user-counselor-a')).get(`${BASE}/admin/control-tower`)).status, 403);

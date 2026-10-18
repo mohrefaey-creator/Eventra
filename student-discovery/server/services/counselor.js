@@ -5,12 +5,30 @@ import { badRequest, notFound, unprocessable } from '../errors.js';
 import { VERIFIED_STATES } from '../../domain/admission/gate.js';
 import { discoveryProfile } from './student.js';
 import { listEvidence } from './student.js';
-import { latestScoreRuns, nextSeq, studentEvidenceMap, publicStudent } from './common.js';
+import { latestScoreRuns, nextSeq, studentEvidenceMap, publicStudent, byId, auditCounselorRead } from './common.js';
+import { getProgram } from '../../domain/catalog/programs.js';
 
 const STUDENT_REASONS = ['help_request', 'appeal', 'interpretation_dispute'];
 const COUNSELOR_REASONS = ['safeguarding_referral', 'parent_inquiry', 'report_review', 'interpretation_dispute', 'help_request', 'appeal', 'unverified_evidence', 'follow_up'];
 
 const clean = (s, max) => String(s ?? '').trim().slice(0, max);
+
+const PURPOSES = ['case_review', 'parent_inquiry', 'appeal_review', 'follow_up', 'safeguarding'];
+
+/**
+ * A case may point at one thing the student is entitled to ask about. Free text here would let a student
+ * attach their case to someone else's report (and later read its outcome), so it must name an object they own.
+ */
+function validSubjectRef(db, studentId, ref) {
+  if (ref === undefined || ref === null || ref === '') return null;
+  const m = /^(program|session|score_run|recommendation_run|report):([A-Za-z0-9._-]{1,80})$/.exec(String(ref));
+  if (!m) throw unprocessable('invalid_subject_ref', 'subject_ref must name a program, session, score, recommendation or report.');
+  const [, kind, id] = m;
+  const coll = { session: db.sessions, score_run: db.score_runs, recommendation_run: db.recommendation_runs, report: db.reports }[kind];
+  const ok = kind === 'program' ? Boolean(getProgram(id)) : Boolean(coll && Object.hasOwn(coll, id) && coll[id].student_id === studentId);
+  if (!ok) throw unprocessable('invalid_subject_ref', 'subject_ref does not refer to one of your own records.');
+  return `${kind}:${id}`;
+}
 
 export function openCase(ctx, studentId, body) {
   const { db, actor } = ctx;
@@ -31,7 +49,7 @@ export function openCase(ctx, studentId, body) {
     opened_by: { id: actor.id, role: actor.role },
     assignee_id: assignee,
     student_message: actor.role === 'student' ? message : null,
-    subject_ref: clean(body?.subject_ref, 120) || null, // e.g. recommendation_run:<id> or program:<id> being challenged
+    subject_ref: validSubjectRef(db, studentId, body?.subject_ref), // e.g. recommendation_run:<id> or program:<id> being challenged
     created_at: ctx.now.toISOString(),
     updated_at: ctx.now.toISOString(),
     resolved_at: null,
@@ -44,7 +62,8 @@ export function openCase(ctx, studentId, body) {
 }
 
 export function listStudentCases(ctx, studentId) {
-  authorize(ctx, studentId, 'case.open');
+  const { student } = authorize(ctx, studentId, 'case.open');
+  auditCounselorRead(ctx, student, 'access.cases_read');
   const isCounselor = ctx.actor.role === 'counselor';
   return Object.values(ctx.db.cases)
     .filter((c) => c.student_id === studentId)
@@ -54,8 +73,7 @@ export function listStudentCases(ctx, studentId) {
 
 export function updateCase(ctx, caseId, body) {
   const { db } = ctx;
-  const c = db.cases[caseId];
-  if (!c) throw notFound('case');
+  const c = byId(ctx, db.cases, caseId, 'case');
   authorize(ctx, c.student_id, 'case.review');
   const status = body?.status;
   if (!['open', 'in_review', 'resolved'].includes(status)) throw badRequest('invalid_status', 'status must be open, in_review or resolved.');
@@ -65,7 +83,11 @@ export function updateCase(ctx, caseId, body) {
   c.updated_at = ctx.now.toISOString();
   c.resolution = status === 'resolved' ? clean(body.resolution, 2000) : null;
   c.resolved_at = status === 'resolved' ? c.updated_at : null;
-  if (body.next_review_at) c.next_review_at = new Date(body.next_review_at).toISOString();
+  if (body.next_review_at) {
+    const when = new Date(body.next_review_at);
+    if (Number.isNaN(+when)) throw badRequest('invalid_date', 'next_review_at must be a valid date.');
+    c.next_review_at = when.toISOString();
+  }
   audit(ctx, { action: 'case.updated', tenant_id: c.tenant_id, subject_ref: `case:${c.id}`, before, after: { status } });
   return c;
 }
@@ -152,7 +174,8 @@ export function counselorQueue(ctx) {
 export function caseView(ctx, studentId, query) {
   const { db } = ctx;
   authorize(ctx, studentId, 'case.review');
-  const purpose = clean(query?.purpose, 80) || 'case_review';
+  const purpose = query?.purpose ?? 'case_review';
+  if (!PURPOSES.includes(purpose)) throw badRequest('invalid_purpose', `purpose must be one of: ${PURPOSES.join(', ')}`);
   const profile = discoveryProfile(ctx, studentId); // counselor-filtered + audited as profile read
   const lastReco = Object.values(db.recommendation_runs).filter((r) => r.student_id === studentId).sort((a, b) => b.seq - a.seq)[0] ?? null;
   const out = {

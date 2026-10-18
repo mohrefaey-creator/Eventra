@@ -50,8 +50,9 @@ export function normalizeDigits(s) {
 }
 
 export function validateEvidenceValue(type, raw) {
-  const spec = EVIDENCE_TYPES[type];
-  if (!spec) throw new ValidationError('unknown_evidence_type', type);
+  // own properties only: "constructor", "__proto__" etc. must not look like evidence types
+  const spec = typeof type === 'string' && Object.hasOwn(EVIDENCE_TYPES, type) ? EVIDENCE_TYPES[type] : undefined;
+  if (!spec) throw new ValidationError('unknown_evidence_type', 'Unknown evidence type.');
   if (spec.kind === 'enum') {
     if (!spec.values.includes(raw)) throw new ValidationError('invalid_evidence_value', `Allowed: ${spec.values.join(', ')}`);
     return raw;

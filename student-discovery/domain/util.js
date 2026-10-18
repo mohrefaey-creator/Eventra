@@ -17,7 +17,7 @@ function normalize(v) {
     case 'boolean':
       return v;
     case 'object': {
-      const out = {};
+      const out = Object.create(null); // own '__proto__' keys must be hashed, not swallowed by the prototype setter
       for (const k of Object.keys(v).sort()) {
         if (v[k] !== undefined) out[k] = normalize(v[k]);
       }
@@ -27,6 +27,9 @@ function normalize(v) {
       throw new TypeError(`canonicalize: unsupported type ${typeof v}`);
   }
 }
+
+/** Lookup that only sees own properties, so ids such as "constructor" or "__proto__" are simply absent. */
+export const own = (obj, key) => (obj && typeof key === 'string' && Object.hasOwn(obj, key) ? obj[key] : undefined);
 
 export function sha256(text) {
   return createHash('sha256').update(text).digest('hex');

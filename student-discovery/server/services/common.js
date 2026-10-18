@@ -1,4 +1,6 @@
 import { PROGRAMS } from '../../domain/catalog/programs.js';
+import { audit } from '../audit.js';
+import { denyUnavailable } from '../policy.js';
 import { buildProfile, latestEvidence } from '../../domain/matching/recommend.js';
 import { getInstrumentByVersionId, getInstrument } from '../../domain/instruments/registry.js';
 
@@ -39,3 +41,16 @@ export function sessionResponses(db, sessionId) {
 }
 
 export const nextSeq = (collection) => Object.keys(collection).length + 1;
+
+/** Look up an object by a caller-supplied id. Unknown ids get the same denial as ids the caller may not see. */
+export function byId(ctx, collection, id, label) {
+  const row = Object.hasOwn(collection, id) ? collection[id] : undefined;
+  if (!row) denyUnavailable(ctx, 'not_found', null, `${label}:${String(id).slice(0, 60)}`);
+  return row;
+}
+
+/** A counselor's read of a student's data is always recorded, with its purpose. */
+export function auditCounselorRead(ctx, student, action) {
+  if (ctx.actor?.role !== 'counselor') return;
+  audit(ctx, { action, tenant_id: student.tenant_id, subject_ref: `student:${student.id}`, meta: { purpose: 'counselor_review' } });
+}

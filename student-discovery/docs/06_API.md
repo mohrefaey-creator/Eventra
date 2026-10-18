@@ -3,8 +3,9 @@
 Base path `/api/v1/discovery` (spec §8). Identity stand-in endpoints live under `/api/v1/identity-stub`.
 JSON in/out; errors are RFC 7807 `application/problem+json` with `code`, `request_id` and, for denials, `reason`.
 Every mutating request needs the `X-CSRF-Token` header (from `GET /identity-stub/me`) and `Content-Type: application/json`.
-`Idempotency-Key` is honored on all mutating routes (same key + same body replays the stored response; same key + different body → 422).
+`Idempotency-Key` is honored on all mutating routes (same key + same body replays a stored snapshot for up to 10 minutes **and only while no consent or relationship record has changed**; same key + different body → 422).
 `PUT …/responses/:itemId` supports `If-Match: "<revision>"` (stale → 412 with `current_revision`).
+**Denials:** identity-related refusals (unknown id, other school, someone else's student, unlinked guardian, unassigned counselor) all answer `403` with `reason: "not_available"`, so a caller cannot probe for existence; the audit log records the true reason. The server only answers loopback `Host` headers unless started with `ALLOW_NETWORK_HOST=true`.
 Machine-readable OpenAPI is **not** produced (deviation 6 in `00`); this table is checked against the real route table by a unit test.
 
 **Authorization column** = the policy intent evaluated by `server/policy.js#authorize` (role → allowed consent scope), or the role list for governance routes.
@@ -37,7 +38,7 @@ Machine-readable OpenAPI is **not** produced (deviation 6 in `00`); this table i
 |---|---|---|
 | `GET /students/:id/discovery-profile` | `profile.read` – student, counselor + sharing | Panels, completeness, evidence, aspirations, preferences, journey |
 | `GET /students/:id/consent` | `consent.read` – student, guardian, counselor | Derived consent state per scope and party |
-| `POST /students/:id/consent` | `consent.write` – student; guardian for `assessment_processing` only | Grant or withdraw one scope |
+| `POST /students/:id/consent` | `consent.write` – student; guardian for `assessment_processing` only and **only while the student is a minor** | Grant or withdraw one scope. During an incident withdrawing still works; granting returns 503 |
 | `GET /students/:id/evidence` | `evidence.read` | Latest and history |
 | `PUT /students/:id/evidence/:type` | `evidence.write` – student + processing | Enter a value (always `unverified`); invalid ranges 422 |
 | `POST /students/:id/evidence/:evidenceId/verify` | `evidence.verify` – counselor + sharing | Mark counselor-verified (note required) |
@@ -49,41 +50,41 @@ Machine-readable OpenAPI is **not** produced (deviation 6 in `00`); this table i
 ## Recommendations and catalog
 | Route | Authorization | Purpose |
 |---|---|---|
-| `POST /students/:id/recommendations` | `recommendation.create` – student + processing | Deterministic run. Identical inputs → same run (200); changed inputs → new run (201) with `changes_since_previous` |
+| `POST /students/:id/recommendations` | `recommendation.create` – student + processing | Deterministic run. Identical inputs → the same run (200, cannot be forced to duplicate); changed inputs → new run (201) with `changes_since_previous`; at most 50 stored runs per student (409 `run_limit_reached`) |
 | `GET /students/:id/recommendations` | `recommendation.read` | Run history |
 | `GET /recommendations/:runId` | `recommendation.read` | Stored output (immutable) |
 | `GET /programs` | any signed-in user | Filter `q`, `cluster`, `university`, `language`, `source_state`; `limit`/`offset` |
 | `GET /programs/:id` | any signed-in user | Program, profile, pathways |
-| `GET /programs/:id/admissions` | any signed-in user (`?cycle=`) | Active rule, provenance, freshness, version list (drafts only for stewards) |
+| `GET /programs/:id/admissions` | any signed-in user (`?cycle=`) | Active rule, provenance, freshness, published version list. Drafts, authors and verifiers only for stewards |
 
 ## Cases, notes, overrides
 | Route | Authorization | Purpose |
 |---|---|---|
-| `POST /students/:id/cases` | `case.open` – student (help/appeal/dispute), counselor (any) | Open a case |
+| `POST /students/:id/cases` | `case.open` – student (help/appeal/dispute), counselor (any) | Open a case. Optional `subject_ref` must name one of the student's own records (`program:`, `session:`, `score_run:`, `recommendation_run:`, `report:`) |
 | `POST /students/:id/counselor-review` | same | Spec-named alias of the above |
 | `GET /students/:id/cases` | `case.open` | Cases for a student |
 | `PATCH /cases/:id` | `case.review` – counselor | `in_review` / `resolved` (resolution required) |
 | `POST /students/:id/notes` | `case.review` | Counselor note (`counselor_only` or `student` visibility) |
 | `POST /students/:id/overrides` | `override.create` | Signed interpretation note over a sealed score (reason ≥ 10 chars). Never changes answers or scores |
 | `GET /counselor/queue` | counselor | Assigned students and reasons; no data peeking without consent |
-| `GET /students/:id/case360` | `case.review` | Bundle for review; logged with a stated purpose |
+| `GET /students/:id/case360` | `case.review` | Bundle for review. `?purpose=` must be one of `case_review`, `parent_inquiry`, `appeal_review`, `follow_up`, `safeguarding`; the read is audited |
 
 ## Reports
 | Route | Authorization | Purpose |
 |---|---|---|
-| `POST /students/:id/reports` | `report.generate` | Build a report payload (identical content → same report) |
+| `POST /students/:id/reports` | `report.generate` – **student only** | Build a report payload (identical content → same report) |
 | `GET /students/:id/reports` | `report.read` | List |
 | `GET /reports/:id` | student, counselor; guardian only via an unexpired share + consent | View; `watermark: "DRAFT"` until approved |
 | `POST /reports/:id/review-request` | `report.generate` | Ask the counselor to review |
-| `POST /reports/:id/approval` | `report.approve` – counselor | `approve`/`reject` bound to the exact `payload_hash` (mismatch → 409) |
+| `POST /reports/:id/approval` | `report.approve` – counselor | `approve`/`reject` bound to the exact `payload_hash` (mismatch → 409); the stored content is re-hashed first; the approver can never be the creator (403 `separation_of_duties`) |
 | `POST /reports/:id/shares` | `report.share` – student + `guardian_summary_sharing` | Share an approved report with the guardian for 1–90 days |
 | `DELETE /shares/:id` | `report.share` | Revoke |
 
 ## Advisor (explain only)
 | Route | Authorization | Purpose |
 |---|---|---|
-| `POST /advisor/tools/get_student_discovery_summary` | `advisor.explain` + purpose allow-list | Spec §10 tool contract; ids and warning flags only |
-| `POST /students/:id/advisor/explain` | `advisor.explain` – student/counselor + `advisor_explanation` | Structured, non-authoritative blocks; abstains without a verified source |
+| `POST /advisor/tools/get_student_discovery_summary` | same as above + purpose allow-list | Spec §10 tool contract; ids and warning flags only |
+| `POST /students/:id/advisor/explain` | `advisor.explain` – student + `advisor_explanation`; counselor + `counselor_sharing` **and** `advisor_explanation`; active processing consent for both | Structured, non-authoritative blocks; abstains without a verified source |
 
 ## Governance
 | Route | Role | Purpose |
@@ -96,7 +97,7 @@ Machine-readable OpenAPI is **not** produced (deviation 6 in `00`); this table i
 | `POST /admin/program-rules` | steward | Draft a rule (source, dates, conditions mandatory) |
 | `POST /admin/program-rules/:id/publish` | steward **other than the author** | Verify and publish; supersedes the previous version |
 | `GET /admin/control-tower` | tenant admin (own school), security | Aggregates with small-cell suppression |
-| `GET /admin/audit` | security | Audit events (filter by action prefix) with chain verification |
+| `GET /admin/audit` | security | Audit events (filter by action prefix) with chain verification; the read is itself audited |
 | `POST /admin/kill-switch` | security | Suspend/resume the whole module (fail closed, 503) |
 
 ## Events (outbox)

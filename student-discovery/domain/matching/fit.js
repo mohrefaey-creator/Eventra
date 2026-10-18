@@ -94,5 +94,7 @@ export function capabilityReadiness(requiredPreparation, evidence, now) {
   if (known.length === 0) return { status: 'evidence_missing', ratio: null, items, aptitude };
   const metCount = items.filter((i) => i.result === 'met' || i.result === 'unverified_met').length;
   const allVerified = items.every((i) => i.result === 'met' || i.result === 'not_met');
-  return { status: allVerified ? 'assessed' : 'provisional', ratio: round(metCount / items.length, 4), met: metCount, total: items.length, items, aptitude };
+  // An item with no evidence is unknown, not a failure: no ratio is offered until every item has a value.
+  const ratio = known.length === items.length ? round(metCount / items.length, 4) : null;
+  return { status: allVerified ? 'assessed' : 'provisional', ratio, met: metCount, known: known.length, total: items.length, items, aptitude };
 }

@@ -11,8 +11,14 @@ import { announce } from '../a11y.js';
 export default async function view() {
   const child = state.me.linked_students?.[0];
   if (!child) return { title: t('guardian.title'), body: h`<div class="stack"><h1>${t('guardian.title')}</h1>${notice('warn', h`<p>${t('guardian.no_child')}</p>`)}</div>` };
-  const consent = await get(`${BASE}/students/${child.id}/consent`);
-  const proc = consent.scopes.assessment_processing;
+  // For an adult student the guardian has no say in consent (the server answers 403); they only see what is shared.
+  let consent = null;
+  try {
+    consent = await get(`${BASE}/students/${child.id}/consent`);
+  } catch (e) {
+    if (e.status !== 403) throw e;
+  }
+  const proc = consent?.scopes.assessment_processing;
   let summary = null;
   let denied = null;
   try {
@@ -21,19 +27,19 @@ export default async function view() {
     if (e.status !== 403) throw e;
     denied = e.reason;
   }
-  const guardianState = proc.parties.guardian.state;
+  const guardianState = proc?.parties.guardian.state;
   return {
     title: t('guardian.title'),
     body: h`<div class="stack"><h1>${t('guardian.title')}</h1>
       <p class="lead">${t('guardian.lead', { name: loc(child.display_name) })}</p>
-      <section class="card accent" aria-labelledby="g-auth"><h2 id="g-auth">${t('guardian.auth.title')}</h2>
+      ${proc ? h`      <section class="card accent" aria-labelledby="g-auth"><h2 id="g-auth">${t('guardian.auth.title')}</h2>
         <p>${t('guardian.auth.body')}</p>
         <p>${t('guardian.auth.student')}: ${chip(proc.parties.student.state === 'granted' ? 'ok' : 'warn', proc.parties.student.state === 'granted' ? '✓' : '…', t(`party.${proc.parties.student.state}`))}
            · ${t('guardian.auth.you')}: ${chip(guardianState === 'granted' ? 'ok' : guardianState === 'withdrawn' ? 'bad' : 'warn', guardianState === 'granted' ? '✓' : guardianState === 'withdrawn' ? '✕' : '…', t(`party.${guardianState}`))}</p>
         ${proc.required_parties.includes('guardian') ? '' : h`<p class="hint">${t('guardian.not_required')}</p>`}
         <div class="row">
           ${guardianState !== 'granted' ? h`<button class="btn" type="button" data-grant="true">${t('guardian.authorize')}</button>` : h`<button class="btn danger" type="button" data-grant="false">${t('guardian.withdraw')}</button>`}
-        </div><p class="small muted">${t('guardian.auth.note')}</p></section>
+        </div><p class="small muted">${t('guardian.auth.note')}</p></section>` : h`<section class="card" role="note"><p>${t('guardian.adult')}</p></section>`}
       ${summary ? h`
         <section class="card" aria-labelledby="g-sum"><h2 id="g-sum">${t('guardian.summary.title')}</h2>
           <ul>${summary.modules.map((m) => h`<li>${loc(m.name)} ${moduleChip(m.status)}</li>`)}</ul>

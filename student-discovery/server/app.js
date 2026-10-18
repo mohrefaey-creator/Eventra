@@ -16,7 +16,7 @@ const webRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../w
  * @param opts.seed       seed synthetic data when the database is empty (default true)
  */
 export function createApp(opts = {}) {
-  const config = { ...loadConfig(), rateLimitPerMinute: POLICY.rate_limit_per_minute, ...opts };
+  const config = { ...loadConfig(), rateLimitPerMinute: POLICY.rate_limit_per_minute, loginLimitPerMinute: POLICY.login_limit_per_minute, ...opts };
   const clock = opts.clock ?? (() => new Date());
   const store = createStore({ file: config.dataFile });
   if (opts.seed !== false && !store.db.meta.seeded_at) seedDatabase(store, clock());

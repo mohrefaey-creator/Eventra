@@ -24,7 +24,8 @@
 7. Rights-request, retention and deletion jobs; incident escalation; monitoring.
 8. OpenAPI/JSON Schema artifacts and contract tests; SBOM and dependency scanning (the runtime has no dependencies; dev tools do).
 9. Pilot design (§15): sampling, pre-registration, subgroup/fairness plan, comprehension and appeal-rate metrics.
-10. Attempt-to-attempt change policy (retake spacing, interpretation of change) beyond the placeholder maximum of five attempts.
+10. Separate visibility class and consent scope for raw answers (spec §11.7); external anchoring of the audit chain; complementary suppression in aggregates; a copy-on-write or database-backed store; guardian-link management (creation, expiry, revocation) beyond the field the policy already honours.
+11. Attempt-to-attempt change policy (retake spacing, interpretation of change) beyond the placeholder maximum of five attempts.
 
 ## Suggested next steps, in order
 1. Obtain the NextMind repository and gate records and complete WP-00 (replace the four stand-ins).

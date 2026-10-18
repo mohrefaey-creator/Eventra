@@ -13,6 +13,7 @@ import * as reports from './services/reports.js';
 import * as advisor from './services/advisor.js';
 import * as admin from './services/admin.js';
 import { TENANTS } from './seed.js';
+import { own } from '../domain/util.js';
 
 const B = '/api/v1/discovery';
 const ID = '/api/v1/identity-stub';
@@ -53,7 +54,7 @@ export function registerRoutes(router, { sessions, clock }) {
   }), { public: true, ...during });
 
   post(`${ID}/login`, (ctx) => {
-    const p = ctx.db.users[ctx.body?.persona_id];
+    const p = own(ctx.db.users, ctx.body?.persona_id);
     if (!p) throw notFound('persona');
     const s = sessions.login(p.id);
     audit({ ...ctx, actor: p }, { action: 'identity_stub.login', tenant_id: p.tenant_id, subject_ref: `user:${p.id}`, meta: { synthetic: true } });
@@ -71,7 +72,8 @@ export function registerRoutes(router, { sessions, clock }) {
     csrf_token: ctx.session?.csrf ?? null,
     linked_students: linkedStudents(ctx),
     synthetic_mode: ctx.config.syntheticMode,
-    incident_mode: ctx.db.meta.kill_switch,
+    // The free-text reason may describe an ongoing incident; only the security role sees it.
+    incident_mode: ctx.actor?.role === 'platform_security' ? ctx.db.meta.kill_switch : { enabled: ctx.db.meta.kill_switch.enabled },
     consent_scopes: Object.keys(CONSENT_SCOPES),
     policy: { policy_version: POLICY.policy_version, legal_basis_ref: POLICY.legal_basis_ref, guardian_required_below_age: POLICY.guardian_required_below_age },
     server_time: clock().toISOString(),
@@ -99,9 +101,9 @@ export function registerRoutes(router, { sessions, clock }) {
 
   // ------------------------------------------------------------ student data
   get(`${B}/students/:id/discovery-profile`, (ctx) => student.discoveryProfile(ctx, ctx.params.id), { tx: true });
-  get(`${B}/students/:id/consent`, (ctx) => consent.getConsent(ctx, ctx.params.id), { tx: false });
-  post(`${B}/students/:id/consent`, (ctx) => consent.setConsent(ctx, ctx.params.id, ctx.body));
-  get(`${B}/students/:id/evidence`, (ctx) => student.listEvidence(ctx, ctx.params.id), { tx: false });
+  get(`${B}/students/:id/consent`, (ctx) => consent.getConsent(ctx, ctx.params.id), { tx: true });
+  post(`${B}/students/:id/consent`, (ctx) => consent.setConsent(ctx, ctx.params.id, ctx.body), during);
+  get(`${B}/students/:id/evidence`, (ctx) => student.listEvidence(ctx, ctx.params.id), { tx: true });
   put(`${B}/students/:id/evidence/:type`, (ctx) => student.putEvidence(ctx, ctx.params.id, ctx.params.type, ctx.body));
   post(`${B}/students/:id/evidence/:evidenceId/verify`, (ctx) => student.verifyEvidence(ctx, ctx.params.id, ctx.params.evidenceId, ctx.body));
   put(`${B}/students/:id/preferences`, (ctx) => student.putPreferences(ctx, ctx.params.id, ctx.body));
@@ -111,10 +113,10 @@ export function registerRoutes(router, { sessions, clock }) {
 
   // ------------------------------------------------------------ recommendations & programs
   post(`${B}/students/:id/recommendations`, (ctx) => {
-    const out = reco.createRecommendation(ctx, ctx.params.id, ctx.body ?? {});
+    const out = reco.createRecommendation(ctx, ctx.params.id);
     return reply(out.created ? 201 : 200, { ...out.run, reused: !out.created });
   });
-  get(`${B}/students/:id/recommendations`, (ctx) => reco.listRecommendations(ctx, ctx.params.id), { tx: false });
+  get(`${B}/students/:id/recommendations`, (ctx) => reco.listRecommendations(ctx, ctx.params.id), { tx: true });
   get(`${B}/recommendations/:runId`, (ctx) => reco.getRecommendation(ctx, ctx.params.runId), { tx: true });
   get(`${B}/programs`, (ctx) => reco.listPrograms(ctx, ctx.query), { tx: false });
   get(`${B}/programs/:id`, (ctx) => reco.getProgramDetail(ctx, ctx.params.id), { tx: false });
@@ -124,7 +126,7 @@ export function registerRoutes(router, { sessions, clock }) {
   const openCase = (ctx) => reply(201, counselor.openCase(ctx, ctx.params.id, ctx.body));
   post(`${B}/students/:id/cases`, openCase);
   post(`${B}/students/:id/counselor-review`, openCase); // spec route name
-  get(`${B}/students/:id/cases`, (ctx) => counselor.listStudentCases(ctx, ctx.params.id), { tx: false });
+  get(`${B}/students/:id/cases`, (ctx) => counselor.listStudentCases(ctx, ctx.params.id), { tx: true });
   patch(`${B}/cases/:id`, (ctx) => counselor.updateCase(ctx, ctx.params.id, ctx.body));
   post(`${B}/students/:id/notes`, (ctx) => reply(201, counselor.addNote(ctx, ctx.params.id, ctx.body)));
   post(`${B}/students/:id/overrides`, (ctx) => reply(201, counselor.createOverride(ctx, ctx.params.id, ctx.body)));
@@ -136,7 +138,7 @@ export function registerRoutes(router, { sessions, clock }) {
     const out = reports.generateReport(ctx, ctx.params.id);
     return reply(out.created ? 201 : 200, { ...out.report, created: out.created });
   });
-  get(`${B}/students/:id/reports`, (ctx) => reports.listReports(ctx, ctx.params.id), { tx: false });
+  get(`${B}/students/:id/reports`, (ctx) => reports.listReports(ctx, ctx.params.id), { tx: true });
   get(`${B}/reports/:id`, (ctx) => reports.getReport(ctx, ctx.params.id), { tx: true });
   post(`${B}/reports/:id/review-request`, (ctx) => reports.requestReview(ctx, ctx.params.id));
   post(`${B}/reports/:id/approval`, (ctx) => reports.decideReport(ctx, ctx.params.id, ctx.body));
@@ -156,7 +158,7 @@ export function registerRoutes(router, { sessions, clock }) {
   post(`${B}/admin/program-rules`, (ctx) => reply(201, admin.createRuleDraft(ctx, ctx.body ?? {})));
   post(`${B}/admin/program-rules/:id/publish`, (ctx) => admin.publishRule(ctx, ctx.params.id));
   get(`${B}/admin/control-tower`, (ctx) => admin.controlTower(ctx), { tx: false, ...during });
-  get(`${B}/admin/audit`, (ctx) => admin.auditLog(ctx, ctx.query), { tx: false, ...during });
+  get(`${B}/admin/audit`, (ctx) => admin.auditLog(ctx, ctx.query), { tx: true, ...during });
   post(`${B}/admin/kill-switch`, (ctx) => admin.setKillSwitch(ctx, ctx.body), during);
 
 }

@@ -145,3 +145,9 @@ export function completeness(instrument, responses) {
   const missing = instrument.items.filter((i) => responses[i.item_id] === undefined).map((i) => i.item_id);
   return { total: instrument.items.length, answered: instrument.items.length - missing.length, missing };
 }
+
+/** Does a stored score_run still hash to the execution_hash recorded when it was computed? */
+export function storedPayloadIntact(run) {
+  const { instrument_id, instrument_version_id, item_bank_hash, algorithm_version, input_hash, construct_scores, missingness, ranking, norm_reference } = run;
+  return hashOf({ instrument_id, instrument_version_id, item_bank_hash, algorithm_version, input_hash, construct_scores, missingness, ranking, norm_reference }) === run.execution_hash;
+}

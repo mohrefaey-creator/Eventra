@@ -27,7 +27,8 @@ were created).
 | Setting | Default | Notes |
 |---|---|---|
 | `PORT` | `4180` | |
-| `HOST` | `127.0.0.1` | Keep it local. The prototype has no real authentication. |
+| `HOST` | `127.0.0.1` | Keep it local. The prototype has no real authentication, so it refuses to start on any other host unless `ALLOW_NETWORK_HOST=true`, and it only answers loopback `Host` headers. |
+| `ALLOW_NETWORK_HOST` | unset | Explicit, risky opt-in: anyone who can reach the port can act as any persona. |
 | `DATA_FILE` | `data/db.json` | Set to an empty string for an in-memory database. |
 | `SYNTHETIC_MODE` | `true` | Set `false` to see the **fail-closed** behavior: exploratory instruments refuse to start. |
 

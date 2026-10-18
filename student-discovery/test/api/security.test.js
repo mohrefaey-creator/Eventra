@@ -65,7 +65,7 @@ test('AC-02 cross-tenant access is denied and recorded as a security event', asy
   for (const path of [`${BASE}/sessions/${a2sessionId}`, `${BASE}/sessions/${a2sessionId}/responses`, `${BASE}/students/user-student-a2/discovery-profile`, `${BASE}/students/user-student-a2/evidence`]) {
     const r = await b1.get(path);
     assert.equal(r.status, 403, path);
-    assert.equal(r.body.reason, 'cross_tenant');
+    assert.equal(r.body.reason, 'not_available', 'the caller cannot tell "other school" from "does not exist"');
   }
   const cB = await app.as('user-counselor-b');
   assert.equal((await cB.get(`${BASE}/students/user-student-a2/case360`)).status, 403);
@@ -80,7 +80,8 @@ test('a student cannot read or write another student in the same school', async 
   const a1 = await app.as('user-student-a1');
   const r = await a1.get(`${BASE}/students/user-student-a2/discovery-profile`);
   assert.equal(r.status, 403);
-  assert.equal(r.body.reason, 'not_self');
+  assert.equal(r.body.reason, 'not_available');
+  assert.ok(app.store.db.audit.some((e) => e.action === 'security.access_denied' && e.actor.id === 'user-student-a1' && e.meta.reason === 'not_self'), 'the audit log keeps the true reason');
   assert.equal((await a1.put(`${BASE}/students/user-student-a2/evidence/gat`, { value: 99 })).status, 403);
 });
 

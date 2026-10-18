@@ -35,7 +35,7 @@ export function buildProfile(latest) {
 
 /** latest evidence per type: { [type]: {id,value,verification_state,expires_at} } */
 export function latestEvidence(records) {
-  const out = {};
+  const out = Object.create(null);
   for (const r of [...records].sort((a, b) => (a.captured_at < b.captured_at ? -1 : a.captured_at > b.captured_at ? 1 : 0))) {
     out[r.type] = { id: r.id, value: r.value, verification_state: r.verification_state, expires_at: r.expires_at ?? null };
   }

@@ -12,12 +12,13 @@ they need qualified people and are listed in `12`.
 | Academic evidence | grades, test scores, pathway | the student; consented counselor. Guardian: not shown |
 | Counselor notes | `case_notes`, override reasons | counselor; a note is visible to the student only if marked so. Never the guardian |
 | Consent records | scope, party, policy version | the student, their guardian, assigned counselor |
-| Audit log | hashed before/after, ids, reasons | security role only; no answer text, evidence values or note text |
+| Audit log | keyed-hash (HMAC) before/after, ids, clipped reasons | security role only; no answer text, evidence values or note text; reading it is audited |
 | Aggregates | control tower | tenant admin (own school) / security; cells under 5 suppressed; only opted-in students counted |
 
 ## Authorization model (server-side on every request, `server/policy.js`)
-Order of checks: **authenticated → tenant match → role allowed for the intent → relationship (self / linked guardian / assigned counselor) →
-consent scope(s) active → purpose allow-list** (advisor). UI hiding is never relied upon (the UI also hides, but tests call the API directly).
+Order of checks: **authenticated → role may ever do this (needs no student, so it cannot reveal existence) → student exists → tenant match →
+relationship (self / linked, unexpired guardian / assigned counselor; guardian consent powers only for minors) → processing consent and every required scope active → purpose allow-list** (advisor).
+Any refusal about identity answers `not_available` to the caller and records the true reason in the audit log (no existence oracle). UI hiding is never relied upon (the UI also hides, but tests call the API directly).
 Platform roles (steward, psychometric lead, tenant admin, security) have **no** path to student content. A kill switch fails the whole module closed (503).
 
 ## Threats considered and where they are handled
@@ -50,11 +51,18 @@ Platform roles (steward, psychometric lead, tenant admin, security) have **no** 
 * **Fairness:** protected attributes are not used by scoring or matching. The only personal attribute used by logic is date of birth, for the consent age rule. **Bias monitoring is not implemented** (needs real data and an approved, proportionate processing basis, spec §11.8).
 * **Commercial use:** none. No advertising, no sale, no profiling beyond the stated educational purpose.
 
+## Independent review
+An independent adversarial review of the server produced 22 confirmed findings, all reproduced as regression tests and addressed or explicitly
+documented as residual risk. See `09_TEST_PLAN_EVIDENCE.md` for the table; the fixes behind the rows above (uniform denials, keyed audit hashes,
+re-checks after slow bodies, consent-aware idempotency, loopback-only serving) come from it.
+
 ## Known gaps (not hidden)
-1. Identity is a stand-in: anyone who can reach the server can sign in as any persona. Keep it on `127.0.0.1`.
+1. Identity is a stand-in: anyone who can reach the server can sign in as any persona, and one person can therefore act as both four-eyes approvers. The server therefore only serves loopback hosts by default and refuses to start elsewhere without an explicit opt-in.
 2. Cookie lacks `Secure` (plain-HTTP local use); no TLS, HSTS or session rotation.
-3. No encryption at rest; `data/db.json` is plaintext (synthetic data only).
-4. Rate limiting is per session, with one shared bucket for signed-out requests.
-5. Stored collections can grow without bound (no retention/pruning).
-6. Audit `meta.purpose` is free text supplied by counselors (length-limited); a real deployment should use a controlled list.
-7. No DPIA, no legal basis (`PENDING-COUNSEL-REVIEW`), no retention schedule, no rights-request handling, no penetration test.
+3. No encryption at rest; `data/db.json` is plaintext (synthetic data only). The audit HMAC key lives in the same file.
+4. Rollback uses a full copy of the database per mutating request; fine at prototype scale, not beyond it. Audit and consent history are append-only and can grow under sustained probing (rate limits slow it).
+5. The audit chain has no external anchor, so truncating its tail with database access is undetectable.
+6. Control-tower numbers at or above the suppression threshold are exact, so differencing between periods is possible; denial counts are not suppressed.
+7. Raw answers and scored data share the `counselor_sharing` scope (spec §11.7 asks for separate visibility classes); a guardian-shared report is wider than the guardian summary by design.
+8. Rate limits key on the socket address, which behind a proxy would be the proxy.
+9. No DPIA, no legal basis (`PENDING-COUNSEL-REVIEW`), no retention schedule, no rights-request handling, no penetration test.

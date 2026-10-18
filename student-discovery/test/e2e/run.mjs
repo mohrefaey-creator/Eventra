@@ -27,7 +27,7 @@ function chromiumPath() {
   return undefined;
 }
 
-const { server } = createApp({ dataFile: null });
+const { server } = createApp({ dataFile: null, loginLimitPerMinute: 100000 }); // the suite signs in far more often than a person would
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const base = `http://127.0.0.1:${server.address().port}`;
 const browser = await chromium.launch({ executablePath: chromiumPath(), args: ['--no-sandbox'] });
@@ -380,7 +380,7 @@ await step('counselor queue shows reasons and gates unconsented students', async
 
 await step('Case 360: keyboard-operable tabs, evidence verification needs a note, signed override, raw answers are logged', async () => {
   const { page } = co;
-  await go(page, '/counselor/student/user-student-a2?purpose=weekly+review');
+  await go(page, '/counselor/student/user-student-a2?purpose=follow_up');
   await page.waitForSelector('[role=tablist]');
   await sane(page, 'case360');
   await page.locator('#tab-overview').focus();
@@ -447,6 +447,17 @@ await step('student shares the approved report; guardian sees it only via the sh
   await g.page.locator('a', { hasText: /Report from/ }).first().click();
   await g.page.waitForSelector('header.card');
   assert.equal(await g.page.locator('.watermark-wrap[data-watermark]').count(), 0);
+  await g.context.close();
+});
+
+await step('guardian of an ADULT student: no authorization card (consent is the student\'s alone) and no access without sharing', async () => {
+  const g = await newUser('user-guardian-b1', { locale: 'en' });
+  await go(g.page, '/guardian');
+  await sane(g.page, 'guardian of adult');
+  const main = await g.page.locator('main').innerText();
+  assert.match(main, /is an adult, so consent is theirs alone/);
+  assert.equal(await g.page.locator('[data-grant]').count(), 0, 'no way to authorize or withdraw for an adult');
+  assert.match(main, /No access to the summary/);
   await g.context.close();
 });
 

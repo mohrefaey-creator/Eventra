@@ -2,10 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { audit, emit } from '../audit.js';
 import { authorize } from '../policy.js';
 import { POLICY } from '../config.js';
-import { badRequest, conflict, forbidden, notFound, unprocessable } from '../errors.js';
+import { badRequest, conflict, forbidden, unprocessable } from '../errors.js';
 import { hashOf } from '../../domain/util.js';
 import { VERIFIED_STATES } from '../../domain/admission/gate.js';
-import { latestScoreRuns, nextSeq, studentEvidenceMap } from './common.js';
+import { latestScoreRuns, nextSeq, studentEvidenceMap, byId, auditCounselorRead } from './common.js';
 
 const LIMITATIONS = ['interest_unvalidated', 'no_norms_or_percentiles', 'aptitude_on_hold', 'not_an_admission_decision', 'fictional_catalog'];
 
@@ -100,8 +100,7 @@ export function generateReport(ctx, studentId) {
 
 export function requestReview(ctx, reportId) {
   const { db } = ctx;
-  const r = db.reports[reportId];
-  if (!r) throw notFound('report');
+  const r = byId(ctx, db.reports, reportId, 'report');
   authorize(ctx, r.student_id, 'report.generate');
   if (r.status === 'review_requested') return r;
   if (r.status !== 'draft') throw conflict('report_not_draft', `Report is ${r.status}.`);
@@ -118,12 +117,17 @@ export function requestReview(ctx, reportId) {
 /** Approval is bound to the exact payload hash (spec J-05, AC: hash must match). */
 export function decideReport(ctx, reportId, body) {
   const { db } = ctx;
-  const r = db.reports[reportId];
-  if (!r) throw notFound('report');
+  const r = byId(ctx, db.reports, reportId, 'report');
   authorize(ctx, r.student_id, 'report.approve');
   const action = body?.action;
   if (!['approve', 'reject'].includes(action)) throw badRequest('invalid_action', "action must be 'approve' or 'reject'.");
   if (r.status !== 'review_requested') throw conflict('report_not_in_review', `Report is ${r.status}; only a report in review can be decided.`);
+  // Separation of duties: whoever created the report cannot be the one to approve it.
+  if (r.created_by === ctx.actor.id) {
+    throw forbidden('separation_of_duties', 'The person who created a report cannot approve it.', { action: 'security.access_denied', tenant_id: r.tenant_id, subject_ref: `report:${r.id}`, meta: { reason: 'separation_of_duties' } });
+  }
+  // The stored content must still hash to the recorded fingerprint, otherwise an approval would sign altered content.
+  if (hashOf(r.payload) !== r.payload_hash) throw conflict('report_integrity_failure', 'The stored report no longer matches its fingerprint.');
   if (body.payload_hash !== r.payload_hash) throw conflict('payload_hash_mismatch', 'The report content you reviewed is not the current content.', { public: { current_payload_hash: r.payload_hash } });
   const reason = String(body.reason ?? '').trim();
   if (action === 'reject' && reason.length < 5) throw unprocessable('reason_required', 'Say why the report is rejected.');
@@ -132,14 +136,15 @@ export function decideReport(ctx, reportId, body) {
   r.status = action === 'approve' ? 'approved' : 'rejected';
   r.approval_id = approval.id;
   r.decided_at = approval.timestamp;
-  for (const c of Object.values(db.cases)) if (c.subject_ref === `report:${r.id}` && c.status !== 'resolved') Object.assign(c, { status: 'resolved', resolved_at: approval.timestamp, updated_at: approval.timestamp, resolution: `Report ${r.status}.` });
+  for (const c of Object.values(db.cases)) if (c.subject_ref === `report:${r.id}` && c.student_id === r.student_id && c.status !== 'resolved') Object.assign(c, { status: 'resolved', resolved_at: approval.timestamp, updated_at: approval.timestamp, resolution: `Report ${r.status}.` });
   audit(ctx, { action: action === 'approve' ? 'report.approved' : 'report.rejected', tenant_id: r.tenant_id, subject_ref: `report:${r.id}`, after: { payload_hash: r.payload_hash, approval_id: approval.id } });
   if (action === 'approve') emit(ctx, 'discovery.report.approved', r.id, { student_id: r.student_id, report_id: r.id }, r.tenant_id);
   return { report: r, approval };
 }
 
 export function listReports(ctx, studentId) {
-  authorize(ctx, studentId, 'report.read');
+  const { student } = authorize(ctx, studentId, 'report.read');
+  auditCounselorRead(ctx, student, 'access.reports_read');
   return Object.values(ctx.db.reports)
     .filter((r) => r.student_id === studentId)
     .sort((a, b) => b.seq - a.seq)
@@ -150,8 +155,7 @@ const activeShare = (db, reportId, now) => Object.values(db.shares).find((s) => 
 
 export function getReport(ctx, reportId) {
   const { db, actor } = ctx;
-  const r = db.reports[reportId];
-  if (!r) throw notFound('report');
+  const r = byId(ctx, db.reports, reportId, 'report');
   if (actor?.role === 'guardian') {
     authorize(ctx, r.student_id, 'guardian.summary'); // relationship + processing + guardian_summary_sharing
     const share = activeShare(db, r.id, ctx.now);
@@ -185,8 +189,7 @@ function reportView(db, r, extra) {
 
 export function shareReport(ctx, reportId, body) {
   const { db } = ctx;
-  const r = db.reports[reportId];
-  if (!r) throw notFound('report');
+  const r = byId(ctx, db.reports, reportId, 'report');
   authorize(ctx, r.student_id, 'report.share');
   if (r.status !== 'approved') throw conflict('report_not_approved', 'Only a counselor-approved report can be shared.');
   const consent = authorize(ctx, r.student_id, 'consent.read').consent;
@@ -203,8 +206,7 @@ export function shareReport(ctx, reportId, body) {
 
 export function revokeShare(ctx, shareId) {
   const { db } = ctx;
-  const s = db.shares[shareId];
-  if (!s) throw notFound('share');
+  const s = byId(ctx, db.shares, shareId, 'share');
   authorize(ctx, s.student_id, 'report.share');
   if (!s.revoked_at) {
     s.revoked_at = ctx.now.toISOString();

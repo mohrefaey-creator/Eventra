@@ -6,7 +6,7 @@ export const T0 = new Date('2026-10-17T12:00:00Z');
 
 export async function startApp(opts = {}) {
   const time = { now: new Date(T0) };
-  const app = createApp({ dataFile: null, clock: () => new Date(time.now), ...opts });
+  const app = createApp({ dataFile: null, clock: () => new Date(time.now), loginLimitPerMinute: 100000, ...opts });
   await new Promise((r) => app.server.listen(0, '127.0.0.1', r));
   const origin = `http://127.0.0.1:${app.server.address().port}`;
   return {

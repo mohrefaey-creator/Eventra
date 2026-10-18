@@ -5,9 +5,9 @@ import { POLICY } from '../config.js';
 import { AppError, badRequest, conflict, notFound, unprocessable } from '../errors.js';
 import { SCALES } from '../../domain/instruments/scales.js';
 import { MODULE_SEQUENCE, DURATION_ESTIMATE_MIN, getInstrument, getInstrumentByVersionId, instrumentUsability } from '../../domain/instruments/registry.js';
-import { computeScore, replayScore, completeness } from '../../domain/scoring/index.js';
+import { computeScore, replayScore, completeness, storedPayloadIntact } from '../../domain/scoring/index.js';
 import { validateResponse, ValidationError } from '../../domain/validation.js';
-import { nextSeq, sessionResponses, instrumentOf } from './common.js';
+import { nextSeq, sessionResponses, instrumentOf, byId } from './common.js';
 
 const usability = (ctx, instrument) =>
   instrumentUsability(instrument, ctx.db.instrument_state[instrument.instrument_id], { syntheticMode: ctx.config.syntheticMode, now: ctx.now });
@@ -167,11 +167,7 @@ function sessionSummary(db, s) {
   };
 }
 
-function loadSession(ctx, sessionId) {
-  const s = ctx.db.sessions[sessionId];
-  if (!s) throw notFound('session');
-  return s;
-}
+const loadSession = (ctx, sessionId) => byId(ctx, ctx.db.sessions, sessionId, 'session');
 
 export function getSession(ctx, sessionId) {
   const s = loadSession(ctx, sessionId);
@@ -293,6 +289,7 @@ export function getScore(ctx, sessionId) {
   if (s.status !== 'submitted') throw conflict('not_scored', 'This attempt has not been submitted yet.');
   const run = Object.values(ctx.db.score_runs).find((r) => r.session_id === s.id && r.status === 'final');
   if (!run) throw notFound('score_run');
+  if (!storedPayloadIntact(run)) throw conflict('integrity_failure', 'The stored result no longer matches its recorded hash.');
   if (ctx.actor.role === 'counselor') audit(ctx, { action: 'access.score_read', tenant_id: s.tenant_id, subject_ref: `score_run:${run.id}`, meta: { purpose: 'counselor_review' } });
   return scoreView(ctx, run);
 }
@@ -319,7 +316,9 @@ export function replaySession(ctx, sessionId) {
   const inst = instrumentOf(s);
   const answers = Object.fromEntries(Object.values(sessionResponses(ctx.db, s.id)).map((r) => [r.item_id, r.normalized_response]));
   const result = replayScore(inst, answers, run);
-  audit(ctx, { action: 'score.replayed', tenant_id: s.tenant_id, subject_ref: `score_run:${run.id}`, after: { match: result.match } });
-  return { score_run_id: run.id, algorithm_version: run.algorithm_version, ...result };
+  // The stored result itself must still hash to its recorded execution_hash, not only the answers.
+  const intact = storedPayloadIntact(run);
+  audit(ctx, { action: 'score.replayed', tenant_id: s.tenant_id, subject_ref: `score_run:${run.id}`, after: { match: result.match && intact } });
+  return { score_run_id: run.id, algorithm_version: run.algorithm_version, ...result, match: result.match && intact, stored_payload_intact: intact };
 }
 

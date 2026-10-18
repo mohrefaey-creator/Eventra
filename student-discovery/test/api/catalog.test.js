@@ -35,13 +35,17 @@ test('admissions endpoint exposes provenance, version and freshness (spec §8)',
   const cs = (await c.get(`${BASE}/programs/prog-demo-cs/admissions?cycle=2027`)).body;
   assert.equal(cs.source_state, 'verified_current');
   for (const k of ['publisher', 'source_url', 'published_at', 'captured_at']) assert.ok(cs.rule.source[k], k);
-  for (const k of ['effective_from', 'effective_to', 'review_due_at', 'cycle', 'verified_by']) assert.ok(cs.rule[k], k);
+  for (const k of ['effective_from', 'effective_to', 'review_due_at', 'cycle']) assert.ok(cs.rule[k], k);
+  assert.equal(cs.rule.verified_by, undefined, 'who verified a rule is governance information, not for students');
+  assert.equal(cs.rule.authored_by, undefined);
   assert.equal(cs.drafts, undefined, 'students do not see drafts');
   assert.equal((await c.get(`${BASE}/programs/prog-demo-cs/admissions?cycle=abc`)).status, 400);
   assert.equal((await c.get(`${BASE}/programs/prog-demo-cs/admissions?cycle=2031`)).body.source_state, 'none');
   assert.equal((await c.get(`${BASE}/programs/prog-demo-nurs/admissions`)).body.source_state, 'stale');
   const steward = await app.as('user-steward-1');
-  assert.equal((await steward.get(`${BASE}/programs/prog-demo-nurs/admissions`)).body.drafts.length, 1);
+  const forSteward = (await steward.get(`${BASE}/programs/prog-demo-nurs/admissions`)).body;
+  assert.equal(forSteward.drafts.length, 1);
+  assert.ok(forSteward.rule.verified_by, 'stewards see who verified the rule');
 });
 
 test('AC-07 / AC-08 stale, conflicting and absent sources are never "eligible"; missing exam score stays evidence_missing', async () => {

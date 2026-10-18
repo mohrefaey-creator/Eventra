@@ -76,6 +76,8 @@ add('deny.not_assigned_counselor', 'You are not the assigned counselor for this 
 add('deny.report_not_shared', 'This report has not been shared with you, or the share has expired.', 'لم تتم مشاركة هذا التقرير معك، أو انتهت مدة المشاركة.')
 add('deny.four_eyes_required', 'A different person must approve this (four-eyes rule).', 'يجب أن يعتمد هذا الإجراء شخص آخر (قاعدة العينين).')
 add('deny.guardian_scope_not_permitted', 'A guardian can only authorize or withdraw assessment processing.', 'يمكن لولي الأمر فقط منح موافقة معالجة التقييمات أو سحبها.')
+add('deny.not_available', 'Not found, or not available to you.', 'غير موجود، أو غير متاح لك.')
+add('deny.separation_of_duties', 'The person who created a report cannot approve it.', 'لا يمكن لمن أنشأ التقرير أن يعتمده.')
 add('deny.csrf', 'Your session needs refreshing. Please sign in again.', 'تحتاج جلستك إلى التحديث. يُرجى تسجيل الدخول مجددًا.')
 
 # ---------------------------------------------------------------- login
@@ -581,6 +583,7 @@ add('guardian.auth.title', 'Your authorization', 'موافقتك')
 add('guardian.auth.body', 'For students under the school’s age threshold, assessments need both the student’s agreement and a guardian’s authorization.', 'للطلاب دون السن المحددة، تتطلب التقييمات موافقة الطالب وإذن ولي الأمر معًا.')
 add('guardian.auth.student', 'Student agreement', 'موافقة الطالب')
 add('guardian.auth.you', 'Your authorization', 'إذنك')
+add('guardian.adult', 'This student is an adult, so consent is theirs alone. You will only see what they choose to share.', 'هذا الطالب بالغ، لذلك الموافقة له وحده. لن ترى إلا ما يختار مشاركته.')
 add('guardian.not_required', 'Your authorization is not required for this student.', 'إذنك غير مطلوب لهذا الطالب.')
 add('guardian.authorize', 'Authorize assessments', 'السماح بإجراء التقييمات')
 add('guardian.withdraw', 'Withdraw my authorization', 'سحب إذني')

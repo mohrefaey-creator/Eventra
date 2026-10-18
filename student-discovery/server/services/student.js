@@ -7,12 +7,13 @@ import { RIASEC_META } from '../../domain/instruments/interest.js';
 import { getProgram } from '../../domain/catalog/programs.js';
 import { VERIFIED_STATES } from '../../domain/admission/gate.js';
 import { moduleCards } from './assessments.js';
-import { latestScoreRuns, publicStudent, studentEvidenceRecords, studentEvidenceMap, nextSeq } from './common.js';
+import { latestScoreRuns, publicStudent, studentEvidenceRecords, studentEvidenceMap, nextSeq, auditCounselorRead } from './common.js';
 
 // ---------------------------------------------------------------- evidence
 
 export function listEvidence(ctx, studentId) {
-  authorize(ctx, studentId, 'evidence.read');
+  const { student } = authorize(ctx, studentId, 'evidence.read');
+  auditCounselorRead(ctx, student, 'access.evidence_read');
   const records = studentEvidenceRecords(ctx.db, studentId).sort((a, b) => (a.captured_at < b.captured_at ? 1 : -1));
   const latest = studentEvidenceMap(ctx.db, studentId);
   return { types: Object.keys(EVIDENCE_TYPES), verified_states: VERIFIED_STATES, latest, history: records };
@@ -222,7 +223,8 @@ export function guardianSummary(ctx, studentId) {
     modules: cards.map((c) => ({ instrument_id: c.instrument_id, name: c.name, status: c.status })),
     top_interests: interest?.ranking?.top?.map((d) => ({ dimension: d, name: RIASEC_META[d].name })) ?? null,
     top_interests_note: interest ? (interest.ranking.complete ? null : 'partial') : null,
-    reports: reports.map((r) => ({ id: r.id, created_at: r.created_at, shared: activeShares.some((s) => s.report_id === r.id) })),
+    // Only reports that were actually shared with the guardian are listed; unshared ones are not even acknowledged.
+    reports: reports.filter((r) => activeShares.some((s) => s.report_id === r.id)).map((r) => ({ id: r.id, created_at: r.created_at, shared: true })),
     consent: Object.fromEntries(Object.entries(consentState(db, studentId, ctx.now).scopes).map(([k, v]) => [k, v.status])),
   };
 }

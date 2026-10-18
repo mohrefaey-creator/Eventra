@@ -1,15 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { audit, emit } from '../audit.js';
 import { authorize } from '../policy.js';
-import { notFound, badRequest } from '../errors.js';
+import { notFound, badRequest, conflict } from '../errors.js';
 import { PROGRAMS, UNIVERSITIES, CLUSTERS, PATHWAYS, getProgram } from '../../domain/catalog/programs.js';
 import { runRecommendations, diffRuns } from '../../domain/matching/recommend.js';
 import { classifySource } from '../../domain/admission/gate.js';
-import { CURRENT_CYCLE, activePrograms, activeRuleFor, nextSeq, studentEvidenceMap, studentProfile } from './common.js';
+import { CURRENT_CYCLE, activePrograms, activeRuleFor, nextSeq, studentEvidenceMap, studentProfile, byId, auditCounselorRead } from './common.js';
 
 const runsOf = (db, studentId) => Object.values(db.recommendation_runs).filter((r) => r.student_id === studentId).sort((a, b) => b.seq - a.seq);
 
-export function createRecommendation(ctx, studentId, body) {
+const MAX_RUNS_PER_STUDENT = 50;
+
+export function createRecommendation(ctx, studentId) {
   const { db } = ctx;
   const { student } = authorize(ctx, studentId, 'recommendation.create');
   const profile = studentProfile(db, studentId);
@@ -25,7 +27,8 @@ export function createRecommendation(ctx, studentId, body) {
   const history = runsOf(db, studentId);
   // Same inputs + same catalog + same algorithm => the same run (idempotent, reproducible).
   const same = history.find((r) => r.input_snapshot_hash === output.input_snapshot_hash && r.catalog_snapshot_id === output.catalog_snapshot_id && r.algorithm_version === output.algorithm_version);
-  if (same && body?.force_recompute !== true) return { run: same, created: false };
+  if (same) return { run: same, created: false }; // identical inputs are never stored twice; there is no way to force a duplicate
+  if (history.length >= MAX_RUNS_PER_STUDENT) throw conflict('run_limit_reached', 'The maximum number of stored suggestion runs has been reached. Ask your counselor.', { public: { max: MAX_RUNS_PER_STUDENT } });
 
   const prev = history[0] ?? null;
   const run = {
@@ -53,15 +56,15 @@ export function createRecommendation(ctx, studentId, body) {
 }
 
 export function getRecommendation(ctx, runId) {
-  const run = ctx.db.recommendation_runs[runId];
-  if (!run) throw notFound('recommendation_run');
+  const run = byId(ctx, ctx.db.recommendation_runs, runId, 'recommendation_run');
   authorize(ctx, run.student_id, 'recommendation.read');
   if (ctx.actor.role === 'counselor') audit(ctx, { action: 'access.recommendation_read', tenant_id: run.tenant_id, subject_ref: `recommendation_run:${run.id}`, meta: { purpose: 'counselor_review' } });
   return run;
 }
 
 export function listRecommendations(ctx, studentId) {
-  authorize(ctx, studentId, 'recommendation.read');
+  const { student } = authorize(ctx, studentId, 'recommendation.read');
+  auditCounselorRead(ctx, student, 'access.recommendations_read');
   return runsOf(ctx.db, studentId).map((r) => ({
     id: r.id,
     created_at: r.created_at,
@@ -141,13 +144,14 @@ export function programAdmissions(ctx, programId, query) {
     program_id: programId,
     cycle,
     source_state: classifySource(rule, ctx.now),
-    rule: rule ? publicRule(rule) : null,
-    versions: history.map((r) => ({ id: r.id, version: r.version, state: r.state, published_at: r.published_at, review_due_at: r.review_due_at })),
-    drafts: steward ? history.filter((r) => r.state === 'draft').map(publicRule) : undefined,
+    rule: rule ? publicRule(rule, steward) : null,
+    // Unpublished drafts and who wrote them are governance information, not for students.
+    versions: history.filter((r) => steward || r.state !== 'draft').map((r) => ({ id: r.id, version: r.version, state: r.state, published_at: r.published_at, review_due_at: r.review_due_at })),
+    drafts: steward ? history.filter((r) => r.state === 'draft').map((r) => publicRule(r, true)) : undefined,
   };
 }
 
-export const publicRule = (r) => ({
+export const publicRule = (r, steward = true) => ({
   id: r.id,
   program_id: r.program_id,
   cycle: r.cycle,
@@ -158,8 +162,8 @@ export const publicRule = (r) => ({
   effective_from: r.effective_from,
   effective_to: r.effective_to,
   review_due_at: r.review_due_at,
-  authored_by: r.authored_by,
-  verified_by: r.verified_by,
+  authored_by: steward ? r.authored_by : undefined,
+  verified_by: steward ? r.verified_by : undefined,
   conflict_detail: r.conflict_detail,
   published_at: r.published_at,
 });

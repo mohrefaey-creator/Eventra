@@ -4,7 +4,8 @@ import { requireRole } from '../policy.js';
 import { POLICY } from '../config.js';
 import { badRequest, conflict, forbidden, notFound, unprocessable } from '../errors.js';
 import { INSTRUMENTS, INSTRUMENT_STATES, getInstrument, instrumentUsability, publicationBlockers } from '../../domain/instruments/registry.js';
-import { PROGRAMS, getProgram } from '../../domain/catalog/programs.js';
+import { PROGRAMS, PATHWAYS, getProgram } from '../../domain/catalog/programs.js';
+import { own } from '../../domain/util.js';
 import { classifySource } from '../../domain/admission/gate.js';
 import { CURRENT_CYCLE, activeRuleFor } from './common.js';
 import { consentState } from '../policy.js';
@@ -102,7 +103,7 @@ export function listRules(ctx) {
       university_id: p.university_id,
       source_state: classifySource(active, ctx.now),
       active: active ? publicRule(active) : null,
-      drafts: all.filter((r) => r.state === 'draft').map(publicRule),
+      drafts: all.filter((r) => r.state === 'draft').map((r) => publicRule(r)),
       versions: all.map((r) => ({ id: r.id, version: r.version, state: r.state, cycle: r.cycle, published_at: r.published_at })),
     };
   });
@@ -126,10 +127,16 @@ export function createRuleDraft(ctx, body) {
   for (const f of ['effective_from', 'effective_to', 'review_due_at']) if (!body[f]) throw unprocessable('date_required', `${f} is required.`);
   if (!Array.isArray(body.conditions) || !body.conditions.length) throw unprocessable('conditions_required', 'At least one condition is required.');
   const conditions = body.conditions.map((c) => {
-    if (!['pathway', 'secondary_percentage', 'gat', 'saat'].includes(c.key)) throw unprocessable('invalid_condition', `Unsupported condition key: ${c.key}`);
-    if (c.key === 'pathway') return { key: 'pathway', op: 'in', value: (Array.isArray(c.value) ? c.value : [c.value]).map(String) };
-    const n = Number(c.value);
-    if (!Number.isFinite(n) || n < 0 || n > 100) throw unprocessable('invalid_condition', `${c.key} must be 0-100.`);
+    if (!c || typeof c !== 'object' || Array.isArray(c)) throw unprocessable('invalid_condition', 'Each condition must be an object.');
+    if (!['pathway', 'secondary_percentage', 'gat', 'saat'].includes(c.key)) throw unprocessable('invalid_condition', 'Unsupported condition key.');
+    if (c.key === 'pathway') {
+      const list = Array.isArray(c.value) ? c.value : [c.value];
+      if (!list.length || !list.every((p) => typeof p === 'string' && Object.hasOwn(PATHWAYS, p))) throw unprocessable('invalid_condition', 'pathway must list known pathways.');
+      return { key: 'pathway', op: 'in', value: list };
+    }
+    // Number(null), Number('') and Number([]) are all 0: only real numbers or numeric strings are accepted.
+    const n = typeof c.value === 'number' ? c.value : typeof c.value === 'string' && c.value.trim() !== '' ? Number(c.value) : Number.NaN;
+    if (!Number.isFinite(n) || n < 0 || n > 100) throw unprocessable('invalid_condition', `${c.key} must be a number from 0 to 100.`);
     return { key: c.key, op: 'gte', value: n };
   });
   const prev = Object.values(db.rule_snapshots).filter((r) => r.program_id === body.program_id && r.cycle === cycle);
@@ -162,9 +169,13 @@ export function createRuleDraft(ctx, body) {
 export function publishRule(ctx, ruleId) {
   const { db, actor } = ctx;
   requireRole(ctx, 'catalog_steward');
-  const r = db.rule_snapshots[ruleId];
+  const r = own(db.rule_snapshots, ruleId);
   if (!r) throw notFound('rule');
   if (r.state !== 'draft') throw conflict('rule_not_draft', `Rule is ${r.state}.`);
+  // A draft was written against the rule that was active at the time. If something else was published since,
+  // publishing it now would silently replace newer, verified content with older content.
+  const current = activeRuleFor(db, r.program_id, r.cycle);
+  if ((current?.id ?? null) !== (r.supersedes_id ?? null)) throw conflict('draft_out_of_date', 'A newer rule was published after this draft was written. Create a new draft from the current rule.');
   if (r.authored_by === actor.id) {
     throw forbidden('four_eyes_required', 'A different steward must verify and publish this rule.', { action: 'security.access_denied', tenant_id: null, subject_ref: `rule:${r.id}`, meta: { reason: 'four_eyes_required' } });
   }
@@ -198,6 +209,7 @@ export function controlTower(ctx) {
   const { db, actor } = ctx;
   requireRole(ctx, 'tenant_admin', 'platform_security');
   const scoped = (t) => actor.role === 'platform_security' || t === actor.tenant_id;
+  const mine = (rows) => rows.filter((e) => scoped(e.tenant_id));
   // Only students who opted in to aggregate analytics contribute to student-derived numbers.
   const students = Object.values(db.users).filter((u) => u.role === 'student' && scoped(u.tenant_id) && consentState(db, u.id, ctx.now).scopes.aggregate_analytics.active);
   const ids = new Set(students.map((s) => s.id));
@@ -236,8 +248,14 @@ export function controlTower(ctx) {
     catalog_freshness: { programs: PROGRAMS.length, ...sources },
     instruments: INSTRUMENTS.map((i) => ({ instrument_id: i.instrument_id, state: db.instrument_state[i.instrument_id]?.state ?? i.governance.state, suspended: Boolean(db.instrument_state[i.instrument_id]?.suspended) })),
     security: { access_denied_total: denied.length, no_consent_denials: consentDenials },
-    operations: { outbox_pending: db.outbox.filter((e) => !e.published_at).length, outbox_retrying: db.outbox.filter((e) => !e.published_at && e.retry_count > 0).length, audit_events: db.audit.length, audit_chain: verifyAuditChain(db) },
-    incident_mode: db.meta.kill_switch,
+    // A school admin sees only their own school's operational counters, never platform-wide or other schools' totals.
+    operations: {
+      outbox_pending: mine(db.outbox.filter((e) => !e.published_at)).length,
+      outbox_retrying: mine(db.outbox.filter((e) => !e.published_at && e.retry_count > 0)).length,
+      audit_events: mine(db.audit).length,
+      audit_chain: actor.role === 'platform_security' ? verifyAuditChain(db) : null,
+    },
+    incident_mode: { enabled: db.meta.kill_switch.enabled, reason: actor.role === 'platform_security' ? db.meta.kill_switch.reason : null },
   };
 }
 
@@ -247,7 +265,10 @@ export function auditLog(ctx, query) {
   const offset = Math.max(Number(query.offset) || 0, 0);
   let rows = [...ctx.db.audit].reverse();
   if (query.action) rows = rows.filter((e) => e.action.startsWith(String(query.action)));
-  return { total: rows.length, chain: verifyAuditChain(ctx.db), items: rows.slice(offset, offset + limit) };
+  const out = { total: rows.length, chain: verifyAuditChain(ctx.db), items: rows.slice(offset, offset + limit) };
+  // Reading the audit log is itself recorded (written after the result is built, so it appears from the next read).
+  audit(ctx, { action: 'access.audit_read', tenant_id: null, subject_ref: 'audit_log', meta: { filter: query.action ? String(query.action).slice(0, 60) : null, returned: out.items.length } });
+  return out;
 }
 
 export function setKillSwitch(ctx, body) {

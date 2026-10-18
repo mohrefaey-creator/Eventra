@@ -10,6 +10,7 @@ export const POLICY = Object.freeze({
   report_share_default_days: 30,
   report_share_max_days: 90,
   rate_limit_per_minute: 300,
+  login_limit_per_minute: 30, // per client address; test harnesses that sign in constantly raise it
   session_ttl_ms: 8 * 3600 * 1000,
   body_limit_bytes: 64 * 1024,
 });
@@ -29,5 +30,7 @@ export function loadConfig(env = process.env) {
     dataFile: env.DATA_FILE === undefined ? new URL('../data/db.json', import.meta.url).pathname : env.DATA_FILE || null,
     // Exploratory instruments may only be used while this is true (fail closed otherwise).
     syntheticMode: env.SYNTHETIC_MODE !== 'false',
+    // The persona stand-in is not authentication. Serving non-loopback hosts must be an explicit, loud opt-in.
+    allowAnyHost: env.ALLOW_NETWORK_HOST === 'true',
   };
 }

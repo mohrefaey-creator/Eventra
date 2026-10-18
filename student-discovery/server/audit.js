@@ -1,6 +1,6 @@
 // Append-only, hash-chained audit log and transactional outbox (spec §7, §8.3, NFR-08).
-import { randomUUID } from 'node:crypto';
-import { hashOf } from '../domain/util.js';
+import { randomUUID, randomBytes, createHmac } from 'node:crypto';
+import { hashOf, canonicalize } from '../domain/util.js';
 
 const GENESIS = '0'.repeat(64);
 
@@ -8,6 +8,21 @@ const GENESIS = '0'.repeat(64);
  * Record a consequential action. `before`/`after` are hashed, never stored (no PII in the log).
  * Must be called inside the same store.tx as the change it describes.
  */
+/**
+ * Before/after values are recorded as a KEYED hash. A plain SHA-256 of a small-domain value (a grade
+ * from 0 to 100, a pathway name) can be brute-forced back into the value by anyone who can read the
+ * log; the HMAC key never leaves the database document.
+ */
+function sealed(db, value) {
+  db.meta.audit_key ??= randomBytes(32).toString('hex');
+  return createHmac('sha256', db.meta.audit_key).update(canonicalize(value)).digest('hex');
+}
+
+/** Free text never enters the immutable chain unbounded. */
+function clipMeta(meta) {
+  return Object.fromEntries(Object.entries(meta ?? {}).map(([k, v]) => [k, typeof v === 'string' ? v.slice(0, 200) : v]));
+}
+
 export function audit(ctx, { action, tenant_id, subject_ref, before = null, after = null, policy_decision = 'allow', meta = {} }) {
   const { db } = ctx;
   const prev = db.audit.at(-1);
@@ -18,10 +33,10 @@ export function audit(ctx, { action, tenant_id, subject_ref, before = null, afte
     actor: ctx.actor ? { id: ctx.actor.id, role: ctx.actor.role } : { id: null, role: 'anonymous' },
     subject_ref: subject_ref ?? null,
     action,
-    before_hash: before === null ? null : hashOf(before),
-    after_hash: after === null ? null : hashOf(after),
+    before_hash: before === null ? null : sealed(db, before),
+    after_hash: after === null ? null : sealed(db, after),
     policy_decision,
-    meta,
+    meta: clipMeta(meta),
     correlation_id: ctx.requestId ?? null,
     timestamp: ctx.now.toISOString(),
     prev_hash: prev ? prev.hash : GENESIS,

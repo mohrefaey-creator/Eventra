@@ -54,8 +54,11 @@ export function createRouter() {
         if (!m) continue;
         pathMatched = true;
         if (r.method !== method) continue;
-        const params = Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])]));
-        return { route: r, params };
+        try {
+          return { route: r, params: Object.fromEntries(r.keys.map((k, i) => [k, decodeURIComponent(m[i + 1])])) };
+        } catch {
+          return { route: r, params: null }; // malformed %-encoding: the caller answers 400
+        }
       }
       return { route: null, pathMatched };
     },
@@ -66,6 +69,10 @@ export function createSessions({ ttlMs = POLICY.session_ttl_ms, clock }) {
   const sessions = new Map();
   return {
     login(personaId) {
+      if (sessions.size >= 2000) {
+        for (const [k, v] of sessions) if (+clock() - v.created_at > ttlMs) sessions.delete(k);
+        if (sessions.size >= 2000) sessions.delete(sessions.keys().next().value); // oldest first
+      }
       const token = randomBytes(32).toString('hex');
       const s = { token, persona_id: personaId, csrf: randomBytes(16).toString('hex'), created_at: +clock(), bucket: { count: 0, resetAt: 0 } };
       sessions.set(token, s);
@@ -118,7 +125,13 @@ export function createHandler({ store, config, router, sessions, clock, webRoot 
 
   function serveStatic(req, res, pathname) {
     if (req.method !== 'GET' && req.method !== 'HEAD') return send(res, 405, toProblem(new AppError(405, 'method_not_allowed', 'Method not allowed'), null), {}, 'application/problem+json');
-    let rel = decodeURIComponent(pathname);
+    let rel;
+    try {
+      rel = decodeURIComponent(pathname);
+    } catch {
+      res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+      return res.end('Bad request');
+    }
     if (rel === '/') rel = '/index.html';
     const file = path.normalize(path.join(webRoot, rel));
     if (!file.startsWith(webRoot + path.sep) && file !== webRoot) {
@@ -154,6 +167,27 @@ export function createHandler({ store, config, router, sessions, clock, webRoot 
     });
   }
 
+  // Fixed-window limits keyed by CLIENT (remote address) and by session. A fresh login does not reset the
+  // client limit, and one noisy anonymous caller cannot lock everyone else out of signing in.
+  const windows = new Map();
+  function take(key, limit, now) {
+    if (windows.size > 5000) for (const [k, w] of windows) if (+now >= w.resetAt) windows.delete(k);
+    let w = windows.get(key);
+    if (!w || +now >= w.resetAt) windows.set(key, (w = { count: 0, resetAt: +now + 60000 }));
+    return ++w.count <= limit;
+  }
+
+  // Idempotent replays are only honoured while nothing that could change authorization has changed.
+  const authEpoch = (db) => Object.keys(db.consent_records).length + db.guardian_links.length + db.counselor_assignments.length;
+  const IDEM_TTL_MS = 10 * 60 * 1000;
+  const IDEM_PER_ACTOR = 100;
+
+  const incident = (db, route) => {
+    if (db.meta.kill_switch.enabled && !route.opts.allowDuringIncident) {
+      throw new AppError(503, 'module_suspended', 'Module suspended', 'Student Discovery is temporarily unavailable.');
+    }
+  };
+
   async function handleApi(req, res, url, requestId) {
     const now = clock();
     const { route, params, pathMatched } = router.match(req.method, url.pathname);
@@ -162,8 +196,12 @@ export function createHandler({ store, config, router, sessions, clock, webRoot 
       if (!route) {
         throw pathMatched ? new AppError(405, 'method_not_allowed', 'Method not allowed') : new AppError(404, 'not_found', 'Not found', 'No such endpoint.');
       }
-      const session = sessions.fromRequest(req);
-      const actor = session ? (store.db.users[session.persona_id] ?? null) : null;
+      if (params === null) throw new AppError(400, 'bad_request', 'Bad request', 'Malformed URL encoding.');
+      const resolve = () => {
+        const sess = sessions.fromRequest(req);
+        return { sess, who: sess ? (store.db.users[sess.persona_id] ?? null) : null };
+      };
+      let { sess: session, who: actor } = resolve();
       base.actor = actor;
       if (!route.opts.public && !actor) throw unauthorized();
 
@@ -171,16 +209,19 @@ export function createHandler({ store, config, router, sessions, clock, webRoot 
       if (mutating && !route.opts.noCsrf) {
         if (!session || req.headers['x-csrf-token'] !== session.csrf) throw forbidden('csrf', 'Missing or invalid CSRF token.');
       }
-      // fixed-window rate limit per session (or per remote address when signed out)
-      const bucket = session ? session.bucket : (sessions.anonBucket ??= { count: 0, resetAt: 0 });
-      if (+now >= bucket.resetAt) Object.assign(bucket, { count: 0, resetAt: +now + 60000 });
-      if (++bucket.count > config.rateLimitPerMinute) throw new AppError(429, 'rate_limited', 'Too many requests', 'Slow down and retry shortly.');
-
-      if (store.db.meta.kill_switch.enabled && !route.opts.allowDuringIncident) {
-        throw new AppError(503, 'module_suspended', 'Module suspended', 'Student Discovery is temporarily unavailable.', { public: { reason: store.db.meta.kill_switch.reason } });
+      const ip = req.socket.remoteAddress ?? 'unknown';
+      if (!take(`ip:${ip}`, config.rateLimitPerMinute * 3, now) || (session && !take(`sess:${session.token}`, config.rateLimitPerMinute, now)) || (route.opts.noCsrf && route.opts.public && !take(`login:${ip}`, config.loginLimitPerMinute, now))) {
+        throw new AppError(429, 'rate_limited', 'Too many requests', 'Slow down and retry shortly.');
       }
 
+      incident(store.db, route); // refuse early...
       const body = mutating ? await readJson(req, POLICY.body_limit_bytes) : undefined;
+      // ...and again: a body can arrive minutes later, after the module was suspended or the user signed out.
+      ({ sess: session, who: actor } = resolve());
+      base.actor = actor;
+      if (!route.opts.public && !actor) throw unauthorized();
+      incident(store.db, route);
+
       const query = Object.fromEntries(url.searchParams);
       const idemHeader = req.headers['idempotency-key'];
 
@@ -189,14 +230,24 @@ export function createHandler({ store, config, router, sessions, clock, webRoot 
         if (mutating && idemHeader && route.opts.tx) {
           const k = `${actor?.id ?? 'anon'}:${idemHeader}`;
           const fp = hashOf([req.method, url.pathname, body ?? null]);
+          const epoch = authEpoch(db);
           const prior = db.idempotency[k];
-          if (prior) {
+          if (prior && prior.epoch === epoch && +now - +new Date(prior.at) < IDEM_TTL_MS) {
             if (prior.fingerprint !== fp) throw new AppError(422, 'idempotency_key_reuse', 'Idempotency key reused', 'This key was used with a different request.');
-            return new Reply(prior.status, prior.body, { 'Idempotent-Replayed': 'true' });
+            return new Reply(prior.status, JSON.parse(prior.body_json), { 'Idempotent-Replayed': 'true' });
           }
+          if (prior) delete db.idempotency[k]; // stale (consent or relationships changed, or expired): run the handler again, with authorization
           const out = route.handler(ctx);
           const r = out instanceof Reply ? out : new Reply(200, out);
-          db.idempotency[k] = { fingerprint: fp, status: r.status, body: r.body, at: now.toISOString() };
+          const bodyJson = JSON.stringify(r.body ?? null);
+          if (bodyJson.length <= POLICY.body_limit_bytes) {
+            // snapshot, not a live reference; prune expired entries and cap what one actor can store
+            const mine = Object.entries(db.idempotency).filter(([key, v]) => key.startsWith(`${actor?.id ?? 'anon'}:`) || +now - +new Date(v.at) >= IDEM_TTL_MS);
+            for (const [key, v] of mine) if (+now - +new Date(v.at) >= IDEM_TTL_MS) delete db.idempotency[key];
+            const live = Object.entries(db.idempotency).filter(([key]) => key.startsWith(`${actor?.id ?? 'anon'}:`));
+            if (live.length >= IDEM_PER_ACTOR) delete db.idempotency[live.sort((a, b) => a[1].at.localeCompare(b[1].at))[0][0]];
+            db.idempotency[k] = { fingerprint: fp, status: r.status, body_json: bodyJson, at: now.toISOString(), epoch: authEpoch(db) };
+          }
           return r;
         }
         return route.handler(ctx);
@@ -227,6 +278,15 @@ export function createHandler({ store, config, router, sessions, clock, webRoot 
     const requestId = randomUUID();
     res.setHeader('X-Request-Id', requestId);
     securityHeaders(res);
+    // The persona stand-in has no real authentication, so only loopback hosts are served. A hostile web page
+    // that rebinds its DNS name to 127.0.0.1 would otherwise be able to drive the app from a victim's browser.
+    if (!config.allowAnyHost) {
+      const host = String(req.headers.host ?? '').toLowerCase();
+      const hostname = host.startsWith('[') ? host.slice(0, host.indexOf(']') + 1) : host.split(':')[0];
+      if (!['127.0.0.1', 'localhost', '[::1]'].includes(hostname)) {
+        return send(res, 403, toProblem(new AppError(403, 'access_denied', 'Access denied', 'This prototype only answers on localhost.'), requestId), {}, 'application/problem+json');
+      }
+    }
     let url;
     try {
       url = new URL(req.url, 'http://localhost');
