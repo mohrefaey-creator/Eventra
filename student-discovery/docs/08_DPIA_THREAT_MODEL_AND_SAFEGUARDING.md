@@ -7,7 +7,7 @@ they need qualified people and are listed in `12`.
 ## Assets and visibility classes (spec §11.7)
 | Class | Examples | Who may read |
 |---|---|---|
-| Raw answers | item responses | the student; an assigned counselor **with** `counselor_sharing` (each read audited). Never a guardian |
+| Raw answers | item responses | the student; an assigned counselor **with** `counselor_sharing` **and** the separate `raw_answer_sharing` (each read audited). Never a guardian |
 | Scored attributes | `score_run`, panels | the student; consented counselor. Guardian: allow-listed summary only (module status, top interest names) |
 | Academic evidence | grades, test scores, pathway | the student; consented counselor. Guardian: not shown |
 | Counselor notes | `case_notes`, override reasons | counselor; a note is visible to the student only if marked so. Never the guardian |
@@ -63,6 +63,10 @@ re-checks after slow bodies, consent-aware idempotency, loopback-only serving) c
 4. Rollback uses a full copy of the database per mutating request; fine at prototype scale, not beyond it. Audit and consent history are append-only and can grow under sustained probing (rate limits slow it).
 5. The audit chain has no external anchor, so truncating its tail with database access is undetectable.
 6. Control-tower numbers at or above the suppression threshold are exact, so differencing between periods is possible; denial counts are not suppressed.
-7. Raw answers and scored data share the `counselor_sharing` scope (spec §11.7 asks for separate visibility classes); a guardian-shared report is wider than the guardian summary by design.
+7. A guardian-shared report is wider than the guardian summary by design (it needs an explicit student share). *(Raw answers used to share the counselor scope with scored data; they now have their own, unticked-by-default consent scope.)*
 8. Rate limits key on the socket address, which behind a proxy would be the proxy.
 9. No DPIA, no legal basis (`PENDING-COUNSEL-REVIEW`), no retention schedule, no rights-request handling, no penetration test.
+10. PDF export runs an installed Chromium/Chrome as a child process. Mitigations: the printed page is built server-side from escaped content with a CSP that forbids script and network, name resolution is disabled, the profile is a throw-away directory, the child gets a minimal environment, renders time out after 30 s, and at most two run at once. The sandbox is turned off only when the server runs as root (a browser refuses to start otherwise). A browser is a large parsing surface: pin and patch it, and run the server unprivileged, before real use.
+11. A conflict-of-interest reason is stored with the conflict record and shown nowhere (not in lists, not in the audit log, which keeps only its length). Who may read it, and for how long, is a school-policy decision that does not exist yet. The school admin sees who stepped away and when, never why.
+12. A student who loses their counselor (conflict or reassignment) is not told; the school admin sees them first in the assignments list, but nothing alerts the admin (the outbox event `discovery.assignment.conflict_declared` has no consumer here).
+13. Ending an assignment keeps the old counselor's notes in the student's record; they are visible to the next counselor (handover is by design) and to nobody the student has not shared with.

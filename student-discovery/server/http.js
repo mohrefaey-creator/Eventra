@@ -47,6 +47,8 @@ export function createRouter() {
       const re = new RegExp(`^${pattern.replace(/:([a-zA-Z]+)/g, (_, k) => (keys.push(k), '([^/]+)'))}$`);
       routes.push({ method, pattern, re, keys, handler, opts: { tx: method !== 'GET', ...opts } });
     },
+    /** Every registered route, for documentation and contract checks. */
+    list: () => routes.map((r) => ({ method: r.method, pattern: r.pattern, opts: r.opts })),
     match(method, pathname) {
       let pathMatched = false;
       for (const r of routes) {

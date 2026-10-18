@@ -17,8 +17,8 @@ Test names are the `test()` titles in `test/`; "e2e" = `test/e2e/run.mjs` step.
 | AC-09 replay is bit-for-bit deterministic | ✅ | canonical JSON + SHA-256; `POST /sessions/:id/replay` | unit `AC-09 replay…`; api `AC-09…`; e2e "Verify the calculation" |
 | AC-10 advisor abstains without a verified source | ✅ | `services/advisor.js` | api `AC-10 the advisor abstains…`; e2e program advisor |
 | AC-11 counselor override = signed reason, sealed data untouched | ✅ | `createOverride` (annotation layer) | api `AC-11 a signed interpretation override…` |
-| AC-12 guardian cannot read raw answers | ✅ | `guardian` absent from raw/score/profile rules; allow-listed summary | api `AC-12…`; e2e guardian |
-| AC-13 Arabic UI/report/screen-reader legible and ordered | 🟡 | RTL, logical CSS, `<bdi>`, Arabic numerals; automated layout + axe | e2e RTL/overflow/axe. **Not done:** native-speaker review, screen-reader session, Arabic **PDF** rendering test (print only) |
+| AC-12 guardian cannot read raw answers | ✅ | `guardian` absent from raw/score/profile rules; allow-listed summary. Raw answers are a separate consent scope (`raw_answer_sharing`) for counselors | api `AC-12…`, `raw answers…`; e2e guardian |
+| AC-13 Arabic UI/report/screen-reader legible and ordered | 🟡 | RTL, logical CSS, `<bdi>`, Arabic numerals; automated layout + axe | e2e RTL/overflow/axe; api `PDF …` (tagged PDF, Arabic text extractable, no replacement glyphs) and a visual check of the Arabic pages. **Not done:** native-speaker review, screen-reader session, PDF/UA validator |
 | AC-14 concurrent submits → one attempt, one scoring command | ✅ | single-threaded handler + status check | api `AC-14 two concurrent submits…` |
 | AC-15 consent withdrawal stops processing, revokes shares | ✅ | `setConsent` + `reconcileSessions`; retention task queued | api `AC-15 withdrawing consent…` |
 | AC-16 old result reproducible after catalog change; new labelled recomputed | ✅ | immutable runs + snapshot ids + diff | api `AC-16…`; e2e majors "What changed" |
@@ -40,7 +40,7 @@ Test names are the `test()` titles in `test/`; "e2e" = `test/e2e/run.mjs` step.
 
 ## Journeys and screens
 See `07_UI_SCREEN_SPEC.md` for DISC-01…14 and their states. Journeys: J-01 enrollment/consent ✅ (age threshold and legal basis are placeholders);
-J-02 dashboard ✅; J-03 item runner ✅ (no timed tasks exist); J-04 results & recommendations ✅; J-05 counselor workflow ✅ (conflict-of-interest/reassignment 🟡 not modelled);
+J-02 dashboard ✅; J-03 item runner ✅ (no timed tasks exist); J-04 results & recommendations ✅; J-05 counselor workflow ✅ (conflict of interest and reassignment ✅; who may read a conflict reason is open);
 J-06 longitudinal reassessment 🟡 (attempt history shown without interpreting change; no policy beyond a max-attempts placeholder).
 
 ## Spec sections not implemented

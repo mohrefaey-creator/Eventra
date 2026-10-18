@@ -1,0 +1,1799 @@
+openapi: 3.1.0
+info:
+  title: NextMind Student Discovery, Aptitude & University Major Fit — prototype API
+  version: 0.2.0
+  summary: Synthetic-data prototype contract. Not a production interface.
+  description: |
+    Machine-readable contract of the local prototype. `docs/06_API.md` is the human summary; this file is checked
+    against the running server by `npm run test:contract` (every registered route is described here, every response
+    the test scenario produces is validated against these schemas, and every outbox event is validated against
+    `events.schema.json`).
+
+    **Safety invariants that are part of the contract, not prose**
+    - `norm_reference` is always `null` (no norms, no percentiles).
+    - `admission_status.acceptance_probability` is always `null`; the API never returns an admission probability.
+    - `composite_fit.value` is `null` and `approved_model` is `false` until an approved weighting model exists.
+    - Errors are RFC 7807 problems. Identity-related denials all read `reason: not_available`, so a caller cannot
+      tell "no such record" from "someone else's record".
+
+    **Conventions.** Sessions use the `sd_session` cookie. Every non-GET request (except login and logout) must also
+    send the `X-CSRF-Token` returned by login / `me`. Non-GET requests may send `Idempotency-Key`; a replay is
+    answered from the first result while nothing that could change authorization (consent, links, assignments) has
+    changed. Every response carries `X-Request-Id`.
+  license:
+    name: Synthetic prototype, no licence granted
+    identifier: LicenseRef-Prototype
+servers:
+  - url: http://127.0.0.1:4180
+    description: Local prototype (loopback only)
+tags:
+  - { name: Platform, description: Health and the identity stand-in (not real authentication) }
+  - { name: Assessments }
+  - { name: Student data }
+  - { name: Recommendations }
+  - { name: Cases }
+  - { name: Reports }
+  - { name: Advisor }
+  - { name: Governance }
+security: []
+
+paths:
+  /api/health:
+    get:
+      operationId: getHealth
+      tags: [Platform]
+      summary: Liveness and mode
+      x-authorization: public
+      security: []
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Health' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/identity-stub/personas:
+    get:
+      operationId: listPersonas
+      tags: [Platform]
+      summary: Synthetic personas to sign in as
+      x-authorization: public
+      security: []
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/PersonaList' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/identity-stub/login:
+    post:
+      operationId: login
+      tags: [Platform]
+      summary: Sign in as a persona (stand-in for the identity service)
+      x-authorization: public (rate limited per client address)
+      security: []
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/LoginRequest' } } }
+      responses:
+        '200':
+          description: Signed in; sets the `sd_session` cookie
+          headers: { Set-Cookie: { schema: { type: string } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/LoginResponse' } } }
+        '404': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/identity-stub/logout:
+    post:
+      operationId: logout
+      tags: [Platform]
+      summary: End the session
+      x-authorization: public
+      security: []
+      responses:
+        '200': { description: Signed out, content: { application/json: { schema: { $ref: '#/components/schemas/Ok' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/identity-stub/me:
+    get:
+      operationId: getMe
+      tags: [Platform]
+      summary: Who am I, linked students, incident state, policy placeholders
+      x-authorization: public (anonymous callers get authenticated=false)
+      security: []
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Me' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+
+  # ------------------------------------------------------------------ assessments
+  /api/v1/discovery/assessments:
+    get:
+      operationId: listMyAssessments
+      tags: [Assessments]
+      summary: Modules for the signed-in student
+      x-authorization: student (self)
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AssessmentList' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/students/{id}/assessments:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      operationId: listAssessmentsForStudent
+      tags: [Assessments]
+      summary: Modules for a student, by id
+      x-authorization: session.read (student only)
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AssessmentList' } } } }
+        '401': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/sessions:
+    post:
+      operationId: createSession
+      tags: [Assessments]
+      summary: Start or resume an attempt
+      x-authorization: session.create (student + assessment_processing)
+      security: [{ sessionCookie: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/CreateSessionRequest' } } }
+      responses:
+        '201': { description: New attempt, content: { application/json: { schema: { $ref: '#/components/schemas/SessionCreated' } } } }
+        '200': { description: Existing attempt returned, content: { application/json: { schema: { $ref: '#/components/schemas/SessionCreated' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/sessions/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      operationId: getSession
+      tags: [Assessments]
+      summary: Items (localized, no keys), scales and saved answers
+      x-authorization: session.read (student)
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/SessionView' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/sessions/{id}/responses/{itemId}:
+    parameters: [{ $ref: '#/components/parameters/Id' }, { $ref: '#/components/parameters/ItemId' }]
+    put:
+      operationId: saveResponse
+      tags: [Assessments]
+      summary: Save one typed answer (server-validated, revisioned)
+      x-authorization: session.write (student + assessment_processing)
+      security: [{ sessionCookie: [], csrfToken: [] }]
+      parameters:
+        - { name: If-Match, in: header, required: false, schema: { type: string }, description: Expected revision, as returned in ETag }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/SaveResponseRequest' } } }
+      responses:
+        '200':
+          description: Saved
+          headers: { ETag: { schema: { type: string } } }
+          content: { application/json: { schema: { $ref: '#/components/schemas/SavedResponse' } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '412': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/sessions/{id}/submit:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      operationId: submitSession
+      tags: [Assessments]
+      summary: Seal and score (deterministic). Duplicate or concurrent submits give one result
+      x-authorization: session.write (student + assessment_processing)
+      security: [{ sessionCookie: [], csrfToken: [] }]
+      requestBody:
+        required: false
+        content: { application/json: { schema: { $ref: '#/components/schemas/SubmitRequest' } } }
+      responses:
+        '201': { description: Sealed now, content: { application/json: { schema: { $ref: '#/components/schemas/SubmitResult' } } } }
+        '200': { description: Already sealed, content: { application/json: { schema: { $ref: '#/components/schemas/SubmitResult' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/sessions/{id}/score:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      operationId: getScore
+      tags: [Assessments]
+      summary: Sealed score with provenance
+      x-authorization: score.read (student; counselor + counselor_sharing)
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ScoreView' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/sessions/{id}/responses:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      operationId: getRawResponses
+      tags: [Assessments]
+      summary: Individual answers (a separate visibility class; a guardian never)
+      x-authorization: responses.read_raw (student; counselor + counselor_sharing + raw_answer_sharing)
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/RawResponses' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/sessions/{id}/replay:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      operationId: replayScore
+      tags: [Assessments]
+      summary: Recompute from the sealed answers and compare hashes
+      x-authorization: score.replay (student; counselor + counselor_sharing)
+      security: [{ sessionCookie: [], csrfToken: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ReplayResult' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  # ------------------------------------------------------------------ student data
+  /api/v1/discovery/students/{id}/discovery-profile:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      operationId: getDiscoveryProfile
+      tags: [Student data]
+      summary: Panels, completeness, evidence, aspirations, preferences, journey
+      x-authorization: profile.read (student; counselor + counselor_sharing)
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/DiscoveryProfile' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/students/{id}/consent:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      operationId: getConsent
+      tags: [Student data]
+      summary: Derived consent state per scope and party
+      x-authorization: consent.read (student; guardian of a minor; counselor)
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ConsentState' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: setConsent
+      tags: [Student data]
+      summary: Grant or withdraw one scope (withdrawing still works during an incident; granting returns 503)
+      x-authorization: consent.write (student; guardian only for assessment_processing and only while the student is a minor)
+      security: [{ sessionCookie: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/SetConsentRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/SetConsentResult' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '503': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/students/{id}/evidence:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      operationId: listEvidence
+      tags: [Student data]
+      summary: Latest and history of academic evidence
+      x-authorization: evidence.read (student; counselor + counselor_sharing)
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/EvidenceList' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/students/{id}/evidence/{type}:
+    parameters: [{ $ref: '#/components/parameters/Id' }, { name: type, in: path, required: true, schema: { type: string }, description: 'pathway, secondary_percentage, gat, saat or subject_grade:<subject>' }]
+    put:
+      operationId: putEvidence
+      tags: [Student data]
+      summary: Enter a value (always unverified)
+      x-authorization: evidence.write (student + assessment_processing)
+      security: [{ sessionCookie: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PutEvidenceRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/EvidenceChange' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/students/{id}/evidence/{evidenceId}/verify:
+    parameters: [{ $ref: '#/components/parameters/Id' }, { name: evidenceId, in: path, required: true, schema: { type: string } }]
+    post:
+      operationId: verifyEvidence
+      tags: [Student data]
+      summary: Mark counselor-verified (a note is required)
+      x-authorization: evidence.verify (counselor + counselor_sharing)
+      security: [{ sessionCookie: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/VerifyEvidenceRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/EvidenceChange' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/students/{id}/preferences:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    put:
+      operationId: putPreferences
+      tags: [Student data]
+      summary: Accessibility and language preferences
+      x-authorization: preferences.write (student)
+      security: [{ sessionCookie: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PreferencesRequest' } } }
+      responses:
+        '200': { description: The values that were stored, content: { application/json: { schema: { $ref: '#/components/schemas/PreferencesRequest' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/students/{id}/aspirations/{programId}:
+    parameters: [{ $ref: '#/components/parameters/Id' }, { $ref: '#/components/parameters/ProgramId' }]
+    put:
+      operationId: pinAspiration
+      tags: [Student data]
+      summary: Pin a major (at most 5)
+      x-authorization: aspiration.write (student + assessment_processing)
+      security: [{ sessionCookie: [], csrfToken: [] }]
+      requestBody:
+        required: false
+        content: { application/json: { schema: { $ref: '#/components/schemas/AspirationRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Aspiration' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+    delete:
+      operationId: unpinAspiration
+      tags: [Student data]
+      summary: Unpin a major
+      x-authorization: aspiration.write (student + assessment_processing)
+      security: [{ sessionCookie: [], csrfToken: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Removed' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/students/{id}/guardian-summary:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      operationId: getGuardianSummary
+      tags: [Student data]
+      summary: Allow-listed summary for a linked guardian
+      x-authorization: guardian.summary (guardian + guardian_summary_sharing)
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/GuardianSummary' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  # ------------------------------------------------------------------ recommendations & catalog
+  /api/v1/discovery/students/{id}/recommendations:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      operationId: createRecommendation
+      tags: [Recommendations]
+      summary: Deterministic run; identical inputs return the same run
+      x-authorization: recommendation.create (student + assessment_processing)
+      security: [{ sessionCookie: [], csrfToken: [] }]
+      responses:
+        '201': { description: New run, content: { application/json: { schema: { $ref: '#/components/schemas/RecommendationRunCreated' } } } }
+        '200': { description: Same inputs, existing run, content: { application/json: { schema: { $ref: '#/components/schemas/RecommendationRunCreated' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listRecommendations
+      tags: [Recommendations]
+      summary: Run history
+      x-authorization: recommendation.read (student; counselor + counselor_sharing)
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/RecommendationRunSummary' } } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/recommendations/{runId}:
+    parameters: [{ name: runId, in: path, required: true, schema: { type: string } }]
+    get:
+      operationId: getRecommendation
+      tags: [Recommendations]
+      summary: Stored output (immutable)
+      x-authorization: recommendation.read (student; counselor + counselor_sharing)
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/RecommendationRun' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/programs:
+    get:
+      operationId: listPrograms
+      tags: [Recommendations]
+      summary: Fictional program catalog
+      x-authorization: any signed-in user
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: q, in: query, schema: { type: string } }
+        - { name: cluster, in: query, schema: { type: string } }
+        - { name: university, in: query, schema: { type: string } }
+        - { name: language, in: query, schema: { type: string } }
+        - { name: source_state, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0 } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ProgramList' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/programs/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      operationId: getProgram
+      tags: [Recommendations]
+      summary: Program, profile, pathways
+      x-authorization: any signed-in user
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ProgramDetail' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/programs/{id}/admissions:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      operationId: getProgramAdmissions
+      tags: [Recommendations]
+      summary: Active rule, provenance, freshness and version list (drafts only for stewards)
+      x-authorization: any signed-in user
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: cycle, in: query, schema: { type: string, pattern: '^[0-9]{4}$' } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ProgramAdmissions' } } } }
+        default: { $ref: '#/components/responses/Problem' }
+
+  # ------------------------------------------------------------------ cases, notes, overrides, assignments
+  /api/v1/discovery/students/{id}/cases:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      operationId: openCase
+      tags: [Cases]
+      summary: "Open a case (student: help, appeal, dispute; counselor: any reason)"
+      x-authorization: case.open (student; counselor + counselor_sharing)
+      security: [{ sessionCookie: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/OpenCaseRequest' } } }
+      responses:
+        '201': { description: Opened, content: { application/json: { schema: { $ref: '#/components/schemas/Case' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listStudentCases
+      tags: [Cases]
+      summary: Cases for a student
+      x-authorization: case.open (student; counselor + counselor_sharing)
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/Case' } } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/students/{id}/counselor-review:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      operationId: requestCounselorReview
+      tags: [Cases]
+      summary: Spec-named alias of openCase
+      x-authorization: case.open (student; counselor + counselor_sharing)
+      security: [{ sessionCookie: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/OpenCaseRequest' } } }
+      responses:
+        '201': { description: Opened, content: { application/json: { schema: { $ref: '#/components/schemas/Case' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/cases/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    patch:
+      operationId: updateCase
+      tags: [Cases]
+      summary: Move a case to in_review or resolved (a resolution is required)
+      x-authorization: case.review (counselor + counselor_sharing)
+      security: [{ sessionCookie: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/UpdateCaseRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Case' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/students/{id}/notes:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      operationId: addNote
+      tags: [Cases]
+      summary: Counselor note (counselor_only or student visibility)
+      x-authorization: case.review (counselor + counselor_sharing)
+      security: [{ sessionCookie: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/NoteRequest' } } }
+      responses:
+        '201': { description: Added, content: { application/json: { schema: { $ref: '#/components/schemas/Note' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/students/{id}/overrides:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      operationId: createOverride
+      tags: [Cases]
+      summary: Signed interpretation note over a sealed score; never changes answers or scores
+      x-authorization: override.create (counselor + counselor_sharing)
+      security: [{ sessionCookie: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/OverrideRequest' } } }
+      responses:
+        '201': { description: Signed, content: { application/json: { schema: { $ref: '#/components/schemas/Override' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/counselor/queue:
+    get:
+      operationId: getCounselorQueue
+      tags: [Cases]
+      summary: Currently assigned students and reasons; no peeking without consent
+      x-authorization: counselor
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/CounselorQueue' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/students/{id}/case360:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      operationId: getCase360
+      tags: [Cases]
+      summary: Review bundle (the read is audited with its purpose; raw answers are not included)
+      x-authorization: case.review (counselor + counselor_sharing)
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: purpose, in: query, schema: { type: string, enum: [case_review, parent_inquiry, appeal_review, follow_up, safeguarding] } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/Case360' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/students/{id}/conflict-of-interest:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      operationId: declareConflictOfInterest
+      tags: [Cases]
+      summary: The assigned counselor steps away; access ends at once and cannot return for this student
+      description: Needs no consent from the student, because stepping away only removes access. The stated reason is kept with the conflict record and is never copied into the audit log or any list.
+      x-authorization: the currently assigned counselor only
+      security: [{ sessionCookie: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ConflictRequest' } } }
+      responses:
+        '200': { description: Stepped away, content: { application/json: { schema: { $ref: '#/components/schemas/ConflictResult' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  # ------------------------------------------------------------------ reports
+  /api/v1/discovery/students/{id}/reports:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      operationId: generateReport
+      tags: [Reports]
+      summary: Build a report (identical content returns the same report)
+      x-authorization: report.generate (student only)
+      security: [{ sessionCookie: [], csrfToken: [] }]
+      responses:
+        '201': { description: New report, content: { application/json: { schema: { $ref: '#/components/schemas/ReportCreated' } } } }
+        '200': { description: Identical report already exists, content: { application/json: { schema: { $ref: '#/components/schemas/ReportCreated' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+    get:
+      operationId: listReports
+      tags: [Reports]
+      summary: List reports
+      x-authorization: report.read (student; counselor + counselor_sharing)
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: array, items: { $ref: '#/components/schemas/ReportListItem' } } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/reports/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      operationId: getReport
+      tags: [Reports]
+      summary: View a report (DRAFT watermark until approved)
+      x-authorization: report.read (student; counselor + counselor_sharing); guardian only through an active share
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ReportView' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/reports/{id}/pdf:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    get:
+      operationId: downloadReportPdf
+      tags: [Reports]
+      summary: Tagged PDF of an approved report (rendered by an installed Chromium or Chrome)
+      description: Same authorization as reading the report. 409 until approved; 501 when no browser is installed; 502 when rendering fails; 429 when too many renders are queued. Nothing about the downloader is printed, so identical approved content and language give an identical (cached) file.
+      x-authorization: as getReport, and the report must be approved
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: locale, in: query, schema: { type: string, enum: [ar-SA, en], default: ar-SA } }
+      responses:
+        '200':
+          description: The PDF
+          headers: { Content-Disposition: { schema: { type: string } } }
+          content: { application/pdf: { schema: { type: string, contentMediaType: application/pdf, format: binary } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '429': { $ref: '#/components/responses/Problem' }
+        '501': { $ref: '#/components/responses/Problem' }
+        '502': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/reports/{id}/review-request:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      operationId: requestReportReview
+      tags: [Reports]
+      summary: Ask the counselor to review a draft
+      x-authorization: report.generate (student only)
+      security: [{ sessionCookie: [], csrfToken: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ReportRecord' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/reports/{id}/approval:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      operationId: decideReport
+      tags: [Reports]
+      summary: Approve or reject, bound to the exact payload hash
+      x-authorization: report.approve (counselor + counselor_sharing); never the creator
+      security: [{ sessionCookie: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/DecideReportRequest' } } }
+      responses:
+        '200': { description: Decided, content: { application/json: { schema: { $ref: '#/components/schemas/ReportDecision' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/reports/{id}/shares:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      operationId: shareReport
+      tags: [Reports]
+      summary: Share an approved report with the guardian for 1 to 90 days
+      x-authorization: report.share (student + guardian_summary_sharing)
+      security: [{ sessionCookie: [], csrfToken: [] }]
+      requestBody:
+        required: false
+        content: { application/json: { schema: { $ref: '#/components/schemas/ShareRequest' } } }
+      responses:
+        '201': { description: Shared, content: { application/json: { schema: { $ref: '#/components/schemas/Share' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/shares/{id}:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    delete:
+      operationId: revokeShare
+      tags: [Reports]
+      summary: Revoke a share
+      x-authorization: report.share (student)
+      security: [{ sessionCookie: [], csrfToken: [] }]
+      responses:
+        '200': { description: Revoked, content: { application/json: { schema: { $ref: '#/components/schemas/Share' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  # ------------------------------------------------------------------ advisor
+  /api/v1/discovery/advisor/tools/get_student_discovery_summary:
+    post:
+      operationId: advisorGetStudentDiscoverySummary
+      tags: [Advisor]
+      summary: Advisor tool contract (spec section 10) - ids and warning flags only
+      x-authorization: advisor.explain (student + advisor_explanation; counselor + counselor_sharing and advisor_explanation) and a purpose from the allow-list
+      security: [{ sessionCookie: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AdvisorSummaryRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AdvisorSummary' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/students/{id}/advisor/explain:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      operationId: advisorExplain
+      tags: [Advisor]
+      summary: Structured, non-authoritative explanation; abstains without a verified source
+      x-authorization: advisor.explain (student + advisor_explanation; counselor + counselor_sharing and advisor_explanation)
+      security: [{ sessionCookie: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/AdvisorExplainRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AdvisorExplanation' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  # ------------------------------------------------------------------ governance
+  /api/v1/discovery/admin/instruments:
+    get:
+      operationId: listInstruments
+      tags: [Governance]
+      summary: Instruments, state, licence, validation, blockers
+      x-authorization: psychometric_lead, platform_security
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/InstrumentList' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/admin/instruments/{id}/publish:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      operationId: publishInstrument
+      tags: [Governance]
+      summary: Request promotion (blocked with reasons while evidence is missing; a second lead must approve)
+      x-authorization: psychometric_lead
+      security: [{ sessionCookie: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/PublishInstrumentRequest' } } }
+      responses:
+        '200': { description: Requested or published, content: { application/json: { schema: { $ref: '#/components/schemas/PublishInstrumentResult' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/admin/instruments/{id}/suspend:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      operationId: suspendInstrument
+      tags: [Governance]
+      summary: Suspend an instrument (reason required)
+      x-authorization: psychometric_lead
+      security: [{ sessionCookie: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/SuspendRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/SuspensionResult' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/admin/instruments/{id}/resume:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      operationId: resumeInstrument
+      tags: [Governance]
+      summary: Resume a suspended instrument (a reason is required)
+      x-authorization: psychometric_lead
+      security: [{ sessionCookie: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/SuspendRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/SuspensionResult' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/admin/program-rules:
+    get:
+      operationId: listProgramRules
+      tags: [Governance]
+      summary: Rules, drafts, versions and source state per program
+      x-authorization: catalog_steward, psychometric_lead, platform_security
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/RuleList' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: createRuleDraft
+      tags: [Governance]
+      summary: Draft an admission rule (source, dates and conditions are mandatory)
+      x-authorization: catalog_steward
+      security: [{ sessionCookie: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RuleDraftRequest' } } }
+      responses:
+        '201': { description: Drafted, content: { application/json: { schema: { $ref: '#/components/schemas/Rule' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '404': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/admin/program-rules/{id}/publish:
+    parameters: [{ $ref: '#/components/parameters/Id' }]
+    post:
+      operationId: publishProgramRule
+      tags: [Governance]
+      summary: Verify and publish (a steward other than the author)
+      x-authorization: catalog_steward other than the author
+      security: [{ sessionCookie: [], csrfToken: [] }]
+      responses:
+        '200': { description: Published, content: { application/json: { schema: { $ref: '#/components/schemas/Rule' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/admin/assignments:
+    get:
+      operationId: listAssignments
+      tags: [Governance]
+      summary: Students (unassigned first) and counselors with load, for the school admin's own school
+      description: Names and assignments only. No student results, answers or notes, and never the reason a counselor gave for stepping away.
+      x-authorization: tenant_admin (own school)
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AssignmentList' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+    post:
+      operationId: reassignStudent
+      tags: [Governance]
+      summary: Give a student to a counselor of the same school (history is kept)
+      x-authorization: tenant_admin (own school)
+      security: [{ sessionCookie: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ReassignRequest' } } }
+      responses:
+        '200': { description: Assigned (changed=false when nothing needed to change), content: { application/json: { schema: { $ref: '#/components/schemas/ReassignResult' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        '409': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/admin/control-tower:
+    get:
+      operationId: getControlTower
+      tags: [Governance]
+      summary: Aggregates with small-cell suppression
+      x-authorization: tenant_admin (own school), platform_security
+      security: [{ sessionCookie: [] }]
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/ControlTower' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/admin/audit:
+    get:
+      operationId: getAuditLog
+      tags: [Governance]
+      summary: Audit events (filter by action prefix) with hash-chain verification; the read is itself audited
+      x-authorization: platform_security
+      security: [{ sessionCookie: [] }]
+      parameters:
+        - { name: action, in: query, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500 } }
+        - { name: offset, in: query, schema: { type: integer, minimum: 0 } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AuditLog' } } } }
+        '403': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+  /api/v1/discovery/admin/kill-switch:
+    post:
+      operationId: setKillSwitch
+      tags: [Governance]
+      summary: Suspend or resume the whole module (fail closed, 503)
+      x-authorization: platform_security
+      security: [{ sessionCookie: [], csrfToken: [] }]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/KillSwitchRequest' } } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/KillSwitch' } } } }
+        '400': { $ref: '#/components/responses/Problem' }
+        '403': { $ref: '#/components/responses/Problem' }
+        '422': { $ref: '#/components/responses/Problem' }
+        default: { $ref: '#/components/responses/Problem' }
+
+components:
+  securitySchemes:
+    sessionCookie: { type: apiKey, in: cookie, name: sd_session, description: HttpOnly, SameSite=Strict session cookie from login }
+    csrfToken: { type: apiKey, in: header, name: X-CSRF-Token, description: Required on every non-GET request except login and logout }
+
+  parameters:
+    Id: { name: id, in: path, required: true, schema: { type: string }, description: Student, session, case, report, share, instrument, rule or program id, depending on the path }
+    ItemId: { name: itemId, in: path, required: true, schema: { type: string } }
+    ProgramId: { name: programId, in: path, required: true, schema: { type: string } }
+
+  responses:
+    Problem:
+      description: RFC 7807 problem. Identity-related denials always read reason=not_available.
+      headers: { X-Request-Id: { schema: { type: string } } }
+      content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+
+  schemas:
+    # ---------------------------------------------------------------- shared
+    LocalizedText:
+      type: object
+      required: ['ar-SA', en]
+      properties: { 'ar-SA': { type: string }, en: { type: string } }
+    Problem:
+      type: object
+      required: [type, title, status, detail, code, request_id]
+      properties:
+        type: { type: string, pattern: '^urn:nextmind:discovery:' }
+        title: { type: string }
+        status: { type: integer, minimum: 400, maximum: 599 }
+        detail: { type: string }
+        code: { type: string }
+        request_id: { type: string }
+        reason: { type: string, description: 'Present on access denials, e.g. not_available, consent_scope_inactive' }
+    Ok: { type: object, required: [ok], properties: { ok: { const: true } } }
+    Role: { type: string, enum: [student, guardian, counselor, psychometric_lead, catalog_steward, tenant_admin, platform_security] }
+    ConsentScope: { type: string, enum: [assessment_processing, counselor_sharing, raw_answer_sharing, guardian_summary_sharing, advisor_explanation, aggregate_analytics] }
+    IsoDateTime: { type: string, pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}T' }
+    Hash: { type: string, pattern: '^[0-9a-f]{64}$' }
+    Removed: { type: object, required: [removed], properties: { removed: { type: boolean } } }
+    Persona:
+      type: object
+      required: [id, role, tenant_id, display_name, grade, synthetic]
+      properties:
+        id: { type: string }
+        role: { $ref: '#/components/schemas/Role' }
+        tenant_id: { type: string }
+        display_name: { $ref: '#/components/schemas/LocalizedText' }
+        grade: { type: [integer, 'null'] }
+        synthetic: { const: true }
+    StudentRef:
+      type: object
+      required: [id, display_name, grade, tenant_id]
+      properties:
+        id: { type: string }
+        display_name: { $ref: '#/components/schemas/LocalizedText' }
+        grade: { type: integer }
+        tenant_id: { type: string }
+
+    # ---------------------------------------------------------------- platform
+    Health:
+      type: object
+      required: [status, synthetic_mode, incident_mode]
+      properties: { status: { const: ok }, synthetic_mode: { type: boolean }, incident_mode: { type: boolean } }
+    PersonaList:
+      type: object
+      required: [notice, tenants, items]
+      properties:
+        notice: { type: string }
+        tenants: { type: object, additionalProperties: { $ref: '#/components/schemas/LocalizedText' } }
+        items: { type: array, items: { $ref: '#/components/schemas/Persona' } }
+    LoginRequest: { type: object, required: [persona_id], properties: { persona_id: { type: string } } }
+    LoginResponse:
+      type: object
+      required: [persona, csrf_token]
+      properties: { persona: { $ref: '#/components/schemas/Persona' }, csrf_token: { type: string } }
+    Me:
+      type: object
+      required: [authenticated, persona, csrf_token, linked_students, synthetic_mode, incident_mode, consent_scopes, policy, server_time]
+      properties:
+        authenticated: { type: boolean }
+        persona: { oneOf: [{ $ref: '#/components/schemas/Persona' }, { type: 'null' }] }
+        csrf_token: { type: [string, 'null'] }
+        linked_students: { type: array, items: { $ref: '#/components/schemas/Persona' } }
+        synthetic_mode: { type: boolean }
+        incident_mode:
+          type: object
+          required: [enabled]
+          properties: { enabled: { type: boolean }, reason: { type: [string, 'null'], description: Only the security role sees the reason }, by: { type: [string, 'null'] }, at: { type: [string, 'null'] } }
+        consent_scopes: { type: array, items: { $ref: '#/components/schemas/ConsentScope' } }
+        policy:
+          type: object
+          required: [policy_version, legal_basis_ref, guardian_required_below_age]
+          properties: { policy_version: { type: string }, legal_basis_ref: { type: string }, guardian_required_below_age: { type: integer } }
+        server_time: { $ref: '#/components/schemas/IsoDateTime' }
+
+    # ---------------------------------------------------------------- assessments
+    ModuleCard:
+      type: object
+      required: [instrument_id, instrument_version_id, version, name, purpose, items_total, usable, status, progress, attempts, can_retake]
+      properties:
+        instrument_id: { type: string }
+        instrument_version_id: { type: string }
+        version: { type: string }
+        name: { $ref: '#/components/schemas/LocalizedText' }
+        purpose: { $ref: '#/components/schemas/LocalizedText' }
+        stem: { $ref: '#/components/schemas/LocalizedText' }
+        construct: { type: string }
+        items_total: { type: integer, minimum: 0 }
+        locale_set: { type: array, items: { type: string } }
+        usage_class: { type: string }
+        interpretation_warning: { $ref: '#/components/schemas/LocalizedText' }
+        duration_estimate_min: { type: [integer, number, 'null'] }
+        usable: { type: boolean }
+        unavailable_reason: { type: [string, 'null'] }
+        hold_reason: { oneOf: [{ $ref: '#/components/schemas/LocalizedText' }, { type: 'null' }] }
+        status: { type: string, enum: [not_started, in_progress, completed, needs_review, unavailable] }
+        blocked_reason: { type: [string, 'null'] }
+        session_id: { type: [string, 'null'] }
+        last_session_id: { type: [string, 'null'] }
+        progress: { type: object, required: [answered, total], properties: { answered: { type: integer }, total: { type: integer } } }
+        attempts: { type: integer, minimum: 0 }
+        last_submitted_at: { type: [string, 'null'] }
+        can_retake: { type: boolean }
+    AssessmentList:
+      type: object
+      required: [sequence, modules]
+      properties: { sequence: { type: array, items: { type: string } }, modules: { type: array, items: { $ref: '#/components/schemas/ModuleCard' } } }
+    CreateSessionRequest:
+      type: object
+      required: [instrument_version_id, idempotency_key]
+      properties:
+        instrument_version_id: { type: string }
+        locale: { type: string, enum: [ar-SA, en] }
+        idempotency_key: { type: string, minLength: 8, maxLength: 64 }
+        consent_record_id: { type: string }
+    SessionSummary:
+      type: object
+      required: [session_id, status, locale, instrument_id, instrument_version_id, items_total, progress, attempt_no, started_at, submitted_at]
+      properties:
+        session_id: { type: string }
+        status: { type: string, enum: [in_progress, submitted, suspended_consent, abandoned] }
+        locale: { type: string }
+        instrument_version: { type: string }
+        instrument_id: { type: string }
+        instrument_version_id: { type: string }
+        items_total: { type: integer }
+        progress: { type: object, required: [answered], properties: { answered: { type: integer } } }
+        attempt_no: { type: integer, minimum: 1 }
+        started_at: { $ref: '#/components/schemas/IsoDateTime' }
+        submitted_at: { type: [string, 'null'] }
+        expires_at: { type: [string, 'null'] }
+    SessionCreated:
+      allOf:
+        - { $ref: '#/components/schemas/SessionSummary' }
+        - { type: object, required: [created], properties: { created: { type: boolean } } }
+    SessionItem:
+      type: object
+      required: [item_id, construct, content, response_type]
+      properties:
+        item_id: { type: string }
+        construct: { type: string }
+        content: { $ref: '#/components/schemas/LocalizedText' }
+        response_type: { type: string }
+        scale: { type: [string, 'null'] }
+        options: { type: [array, 'null'] }
+        status: { type: string }
+    SessionView:
+      allOf:
+        - { $ref: '#/components/schemas/SessionSummary' }
+        - type: object
+          required: [instrument, scales, items, responses, can_edit]
+          properties:
+            instrument: { type: object, required: [instrument_id, name], properties: { instrument_id: { type: string }, name: { $ref: '#/components/schemas/LocalizedText' } } }
+            scales: { type: object }
+            items: { type: array, items: { $ref: '#/components/schemas/SessionItem' } }
+            responses: { type: object, additionalProperties: { type: object, required: [revision_seq], properties: { revision_seq: { type: integer } } } }
+            can_edit: { type: boolean }
+    SaveResponseRequest: { type: object, required: [value], properties: { value: { type: [integer, number, string] } } }
+    SavedResponse:
+      type: object
+      required: [item_id, value, revision_seq, progress]
+      properties:
+        item_id: { type: string }
+        value: { type: [integer, number, string] }
+        revision_seq: { type: integer, minimum: 1 }
+        progress: { type: object, required: [answered, total], properties: { answered: { type: integer }, total: { type: integer } } }
+    SubmitRequest: { type: object, properties: { acknowledge_incomplete: { type: boolean } } }
+    SubmitResult:
+      type: object
+      required: [session, score_run_id, already_submitted]
+      properties:
+        session: { $ref: '#/components/schemas/SessionSummary' }
+        score_run_id: { type: [string, 'null'] }
+        already_submitted: { type: boolean }
+    ConstructScore:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [ok, insufficient_data, not_applicable] }
+        n_answered: { type: integer }
+        n_total: { type: integer }
+        min_required: { type: integer }
+        mean: { type: [number, 'null'] }
+        display_0_100: { type: [number, 'null'] }
+        value_0_1: { type: [number, 'null'] }
+    Ranking:
+      type: object
+      required: [complete, dimensions_scored, order, top, tie_rule]
+      properties:
+        complete: { type: boolean }
+        dimensions_scored: { type: integer }
+        order: { type: array, items: { type: object } }
+        top: { type: array, items: { type: string } }
+        tie_rule: { type: string }
+    ScoreView:
+      type: object
+      required: [score_run_id, session_id, instrument, algorithm_version, input_hash, execution_hash, executed_at, status, construct_scores, missingness, norm_reference, interpretation_warning, overrides]
+      properties:
+        score_run_id: { type: string }
+        session_id: { type: string }
+        instrument: { type: object, required: [instrument_id], properties: { instrument_id: { type: string } } }
+        algorithm_version: { type: string }
+        input_hash: { $ref: '#/components/schemas/Hash' }
+        execution_hash: { $ref: '#/components/schemas/Hash' }
+        executed_at: { $ref: '#/components/schemas/IsoDateTime' }
+        status: { type: string, enum: [final] }
+        supersedes_id: { type: [string, 'null'] }
+        construct_scores: { type: object, additionalProperties: { $ref: '#/components/schemas/ConstructScore' } }
+        missingness: { type: object }
+        ranking: { oneOf: [{ $ref: '#/components/schemas/Ranking' }, { type: 'null' }] }
+        norm_reference: { type: 'null', description: Always null - there are no norms and no percentiles }
+        interpretation_warning: { $ref: '#/components/schemas/LocalizedText' }
+        overrides: { type: array, items: { $ref: '#/components/schemas/Override' } }
+    RawResponses:
+      type: object
+      required: [session_id, sealed, answers]
+      properties:
+        session_id: { type: string }
+        sealed: { type: boolean }
+        answers:
+          type: array
+          items:
+            type: object
+            required: [item_id, construct, content, value]
+            properties: { item_id: { type: string }, construct: { type: string }, content: { $ref: '#/components/schemas/LocalizedText' }, value: { type: [integer, number, string, 'null'] }, sealed_at: { type: [string, 'null'] } }
+    ReplayResult:
+      type: object
+      required: [score_run_id, algorithm_version, match, recomputed_hash, stored_hash, stored_payload_intact]
+      properties:
+        score_run_id: { type: string }
+        algorithm_version: { type: string }
+        match: { type: boolean }
+        recomputed_hash: { $ref: '#/components/schemas/Hash' }
+        stored_hash: { $ref: '#/components/schemas/Hash' }
+        stored_payload_intact: { type: boolean }
+
+    # ---------------------------------------------------------------- consent
+    ScopeParty:
+      type: object
+      required: [state, record_id, at]
+      properties: { state: { type: string, enum: [none, granted, withdrawn] }, record_id: { type: [string, 'null'] }, at: { type: [string, 'null'] } }
+    ScopeState:
+      type: object
+      required: [required_parties, parties, active, pending, withdrawn, status]
+      properties:
+        required_parties: { type: array, items: { type: string, enum: [student, guardian] } }
+        parties: { type: object, required: [student, guardian], properties: { student: { $ref: '#/components/schemas/ScopeParty' }, guardian: { $ref: '#/components/schemas/ScopeParty' } } }
+        active: { type: boolean }
+        pending: { type: array, items: { type: string } }
+        withdrawn: { type: array, items: { type: string } }
+        status: { type: string, enum: [active, pending, withdrawn, inactive] }
+    ConsentState:
+      type: object
+      required: [student_id, guardian_required, policy_version, legal_basis_ref, scopes]
+      properties:
+        student_id: { type: string }
+        guardian_required: { type: boolean }
+        policy_version: { type: string }
+        legal_basis_ref: { type: string }
+        scopes:
+          type: object
+          required: [assessment_processing, counselor_sharing, raw_answer_sharing, guardian_summary_sharing, advisor_explanation, aggregate_analytics]
+          additionalProperties: false
+          properties:
+            assessment_processing: { $ref: '#/components/schemas/ScopeState' }
+            counselor_sharing: { $ref: '#/components/schemas/ScopeState' }
+            raw_answer_sharing: { $ref: '#/components/schemas/ScopeState' }
+            guardian_summary_sharing: { $ref: '#/components/schemas/ScopeState' }
+            advisor_explanation: { $ref: '#/components/schemas/ScopeState' }
+            aggregate_analytics: { $ref: '#/components/schemas/ScopeState' }
+    SetConsentRequest:
+      type: object
+      required: [scope, granted]
+      properties: { scope: { $ref: '#/components/schemas/ConsentScope' }, granted: { type: boolean } }
+    SetConsentResult:
+      type: object
+      required: [changed, consent]
+      properties: { changed: { type: boolean }, consent: { $ref: '#/components/schemas/ConsentState' } }
+
+    # ---------------------------------------------------------------- student data
+    Evidence:
+      type: object
+      required: [id, type, value, verification_state]
+      properties:
+        id: { type: string }
+        seq: { type: integer }
+        student_id: { type: string }
+        tenant_id: { type: string }
+        type: { type: string }
+        value: { type: [number, string] }
+        provenance: { type: object }
+        verification_state: { type: string, enum: [unverified, counselor_verified, official_verified] }
+        verified_by: { type: [string, 'null'] }
+        verified_at: { type: [string, 'null'] }
+        captured_at: { type: string }
+        expires_at: { type: [string, 'null'] }
+        supersedes_id: { type: [string, 'null'] }
+    EvidenceList:
+      type: object
+      required: [types, verified_states, latest, history]
+      properties:
+        types: { type: array, items: { type: string } }
+        verified_states: { type: array, items: { type: string } }
+        latest: { type: object, additionalProperties: { type: object, required: [id, value, verification_state] } }
+        history: { type: array, items: { $ref: '#/components/schemas/Evidence' } }
+    PutEvidenceRequest: { type: object, required: [value], properties: { value: { type: [number, string] } } }
+    VerifyEvidenceRequest: { type: object, required: [note], properties: { note: { type: string, minLength: 1, maxLength: 500 } } }
+    EvidenceChange:
+      type: object
+      required: [changed, evidence]
+      properties: { changed: { type: boolean }, evidence: { $ref: '#/components/schemas/Evidence' } }
+    PreferencesRequest:
+      type: object
+      properties:
+        locale: { type: string, enum: [ar-SA, en] }
+        accessibility:
+          type: object
+          properties: { text_size: { type: string }, high_contrast: { type: boolean }, reduce_motion: { type: boolean } }
+    AspirationRequest: { type: object, properties: { note: { type: string, maxLength: 500 } } }
+    Aspiration:
+      type: object
+      required: [student_id, program_id, pinned_at]
+      properties: { student_id: { type: string }, program_id: { type: string }, note: { type: [string, 'null'] }, pinned_at: { type: string } }
+    DiscoveryProfile:
+      type: object
+      required: [student, consent, modules, panels, completeness, evidence, aspirations, preferences, journey, notes, attempts]
+      properties:
+        student: { $ref: '#/components/schemas/StudentRef' }
+        consent: { $ref: '#/components/schemas/ConsentState' }
+        modules: { type: array, items: { $ref: '#/components/schemas/ModuleCard' } }
+        panels:
+          type: object
+          required: [expressed_interests, subject_preferences, work_values, self_reported_confidence, demonstrated_capabilities, admission_readiness]
+          properties:
+            expressed_interests: { $ref: '#/components/schemas/ProfilePanel' }
+            subject_preferences: { $ref: '#/components/schemas/ProfilePanel' }
+            work_values: { $ref: '#/components/schemas/ProfilePanel' }
+            self_reported_confidence: { $ref: '#/components/schemas/ProfilePanel' }
+            demonstrated_capabilities: { type: object, required: [status] }
+            admission_readiness: { type: object, required: [status] }
+        completeness:
+          type: object
+          required: [modules_sealed, modules_total, aptitude, academic_evidence_present, academic_evidence_total, academic_evidence_verified]
+          properties: { modules_sealed: { type: integer }, modules_total: { type: integer }, aptitude: { type: string }, academic_evidence_present: { type: integer }, academic_evidence_total: { type: integer }, academic_evidence_verified: { type: integer } }
+        evidence: { type: array, items: { type: object, required: [type, id, verification_state] } }
+        aspirations: { type: array, items: { $ref: '#/components/schemas/Aspiration' } }
+        preferences: { type: object, required: [accessibility, locale] }
+        journey: { type: array, items: { type: object, required: [event_id, key, event_type, at] } }
+        notes: { type: array, items: { $ref: '#/components/schemas/ProfileNote' } }
+        attempts: { type: object }
+    ProfileNote:
+      type: object
+      required: [id, body, visibility, created_at]
+      description: A note as shown in the profile. The author appears only for counselors.
+      properties: { id: { type: string }, case_id: { type: [string, 'null'] }, body: { type: string }, visibility: { type: string, enum: [counselor_only, student] }, author_id: { type: string }, created_at: { type: string } }
+    ProfilePanel:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [sealed, incomplete_evidence] }
+        score_run_id: { type: [string, 'null'] }
+        executed_at: { type: string }
+        algorithm_version: { type: string }
+        construct_scores: { type: object, additionalProperties: { $ref: '#/components/schemas/ConstructScore' } }
+        ranking: { oneOf: [{ $ref: '#/components/schemas/Ranking' }, { type: 'null' }] }
+        norm_reference: { type: 'null' }
+    GuardianSummary:
+      type: object
+      required: [student, modules, top_interests, reports, consent]
+      properties:
+        student: { type: object, required: [id, display_name, grade] }
+        modules: { type: array, items: { type: object, required: [instrument_id, name, status] } }
+        top_interests: { type: array, items: { type: object, required: [dimension, name] } }
+        top_interests_note: { type: [string, 'null'] }
+        reports: { type: array, items: { type: object } }
+        consent: { type: object, additionalProperties: { type: string } }
+
+    # ---------------------------------------------------------------- recommendations
+    Eligibility: { type: string, enum: [verified_eligible, verified_ineligible, evidence_missing, source_stale, manual_review_required, not_evaluated] }
+    RecommendationItem:
+      type: object
+      required: [program_id, interest_fit, composite_fit, capability_readiness, admission_status, missing_inputs, human_review_status]
+      properties:
+        program_id: { type: string }
+        rank_if_available: { type: [integer, 'null'] }
+        interest_fit: { type: object, required: [status] }
+        composite_fit:
+          type: object
+          required: [status, value, approved_model]
+          properties: { status: { type: string }, value: { type: 'null', description: Refused until an approved weighting model exists }, approved_model: { const: false }, missing: { type: array, items: { type: string } } }
+        capability_readiness: { type: object, required: [status, aptitude] }
+        admission_status:
+          type: object
+          required: [acceptance_probability, eligibility, source_state]
+          properties:
+            acceptance_probability: { type: 'null', description: Never provided }
+            eligibility: { $ref: '#/components/schemas/Eligibility' }
+            source_state: { type: string }
+            rule_snapshot_id: { type: [string, 'null'] }
+            conditions: { type: array, items: { type: object } }
+            required_evidence: { type: array, items: { type: string } }
+        missing_inputs: { type: array, items: { type: string } }
+        uncertainties: { type: array, items: { type: string } }
+        human_review_status: { type: string }
+    RecommendationSummary:
+      type: object
+      required: [programs, with_interest_fit, by_eligibility]
+      properties: { programs: { type: integer }, with_interest_fit: { type: integer }, by_eligibility: { type: object, additionalProperties: { type: integer } } }
+    RecommendationRunSummary:
+      type: object
+      required: [id, created_at, recomputed, catalog_snapshot_id, algorithm_version, changes_since_previous, summary]
+      properties:
+        id: { type: string }
+        created_at: { $ref: '#/components/schemas/IsoDateTime' }
+        recomputed: { type: boolean }
+        catalog_snapshot_id: { type: string }
+        algorithm_version: { type: string }
+        changes_since_previous: { type: integer }
+        summary: { $ref: '#/components/schemas/RecommendationSummary' }
+    RecommendationRun:
+      type: object
+      required: [id, student_id, input_snapshot_hash, catalog_snapshot_id, algorithm_version, decision_status, score_run_ids, created_at, output]
+      properties:
+        id: { type: string }
+        student_id: { type: string }
+        input_snapshot_hash: { $ref: '#/components/schemas/Hash' }
+        catalog_snapshot_id: { type: string }
+        algorithm_version: { type: string }
+        decision_status: { type: string }
+        recomputed: { type: boolean }
+        changes_since_previous: { type: array, items: { type: object } }
+        score_run_ids: { type: object, additionalProperties: { type: string } }
+        created_at: { $ref: '#/components/schemas/IsoDateTime' }
+        output:
+          type: object
+          required: [algorithm_version, catalog_snapshot_id, summary, items]
+          properties: { algorithm_version: { type: string }, catalog_snapshot_id: { type: string }, summary: { $ref: '#/components/schemas/RecommendationSummary' }, items: { type: array, items: { $ref: '#/components/schemas/RecommendationItem' } } }
+    RecommendationRunCreated:
+      allOf:
+        - { $ref: '#/components/schemas/RecommendationRun' }
+        - { type: object, required: [reused], properties: { reused: { type: boolean } } }
+    ProgramSummary:
+      type: object
+      required: [program_id, fictional, university, official_name, degree_level, instruction_language, field_cluster, cluster_name, status, admission]
+      properties:
+        program_id: { type: string }
+        fictional: { const: true }
+        university: { type: object, required: [id, name] }
+        official_name: { $ref: '#/components/schemas/LocalizedText' }
+        degree_level: { type: string }
+        instruction_language: { type: string }
+        taxonomy_code: { type: string }
+        field_cluster: { type: string }
+        cluster_name: { $ref: '#/components/schemas/LocalizedText' }
+        status: { type: string }
+        admission: { type: object, required: [cycle, source_state] }
+        profile_source: { type: string }
+    ProgramList:
+      type: object
+      required: [total, limit, offset, items, facets]
+      properties: { total: { type: integer }, limit: { type: integer }, offset: { type: integer }, items: { type: array, items: { $ref: '#/components/schemas/ProgramSummary' } }, facets: { type: object } }
+    ProgramDetail:
+      allOf:
+        - { $ref: '#/components/schemas/ProgramSummary' }
+        - { type: object, required: [profile, pathways], properties: { profile: { type: object }, pathways: { type: object } } }
+    Rule:
+      type: object
+      required: [id, program_id, cycle, version, state, rules, source, effective_from, effective_to, review_due_at]
+      properties:
+        id: { type: string }
+        program_id: { type: string }
+        cycle: { type: string }
+        version: { type: integer }
+        state: { type: string, enum: [draft, published, superseded, conflicting, expired] }
+        rules: { type: object, required: [conditions] }
+        source: { type: object, required: [publisher, source_url, published_at, captured_at] }
+        effective_from: { type: string }
+        effective_to: { type: string }
+        review_due_at: { type: string }
+        conflict_detail: { type: [object, string, 'null'] }
+        published_at: { type: [string, 'null'] }
+        authored_by: { type: [string, 'null'] }
+        verified_by: { type: [string, 'null'] }
+    ProgramAdmissions:
+      type: object
+      required: [program_id, cycle, source_state, versions]
+      properties:
+        program_id: { type: string }
+        cycle: { type: string }
+        source_state: { type: string }
+        rule: { oneOf: [{ $ref: '#/components/schemas/Rule' }, { type: 'null' }] }
+        versions: { type: array, items: { type: object, required: [id, version, state] } }
+
+    # ---------------------------------------------------------------- cases
+    OpenCaseRequest:
+      type: object
+      required: [reason_code]
+      properties: { reason_code: { type: string }, message: { type: string, maxLength: 2000 }, subject_ref: { type: string } }
+    Case:
+      type: object
+      required: [id, seq, tenant_id, student_id, reason_code, status, opened_by, created_at, updated_at]
+      properties:
+        id: { type: string }
+        seq: { type: integer }
+        tenant_id: { type: string }
+        student_id: { type: string }
+        reason_code: { type: string }
+        status: { type: string, enum: [open, in_review, resolved] }
+        opened_by: { type: object, required: [id, role] }
+        assignee_id: { type: [string, 'null'], description: Not shown to students }
+        student_message: { type: [string, 'null'] }
+        subject_ref: { type: [string, 'null'] }
+        created_at: { $ref: '#/components/schemas/IsoDateTime' }
+        updated_at: { $ref: '#/components/schemas/IsoDateTime' }
+        resolved_at: { type: [string, 'null'] }
+        resolution: { type: [string, 'null'] }
+        next_review_at: { type: [string, 'null'] }
+    UpdateCaseRequest:
+      type: object
+      required: [status]
+      properties: { status: { type: string, enum: [open, in_review, resolved] }, resolution: { type: string }, next_review_at: { type: string } }
+    NoteRequest:
+      type: object
+      required: [body]
+      properties: { body: { type: string, minLength: 2, maxLength: 4000 }, visibility: { type: string, enum: [counselor_only, student] }, case_id: { type: string } }
+    Note:
+      type: object
+      required: [id, student_id, author_id, body, visibility, created_at]
+      properties: { id: { type: string }, seq: { type: integer }, tenant_id: { type: string }, student_id: { type: string }, case_id: { type: [string, 'null'] }, author_id: { type: string }, body: { type: string }, visibility: { type: string, enum: [counselor_only, student] }, created_at: { type: string } }
+    OverrideRequest:
+      type: object
+      required: [score_run_id, text, reason]
+      properties: { score_run_id: { type: string }, text: { type: string, minLength: 5, maxLength: 1000 }, reason: { type: string, minLength: 10, maxLength: 1000 }, visibility: { type: string, enum: [counselor_only, student] } }
+    Override:
+      type: object
+      required: [id, student_id, score_run_id, text, visibility]
+      properties: { id: { type: string }, student_id: { type: string }, score_run_id: { type: string }, kind: { type: string }, text: { type: string }, reason: { type: string }, visibility: { type: string }, counselor_id: { type: string }, score_run_execution_hash: { $ref: '#/components/schemas/Hash' }, created_at: { type: string } }
+    CounselorQueue:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [student, access, reasons, open_cases]
+            properties: { student: { $ref: '#/components/schemas/StudentRef' }, access: { type: string, enum: [full, no_consent] }, reasons: { type: array, items: { type: string } }, open_cases: { type: integer } }
+    Case360:
+      type: object
+      required: [profile, evidence, cases, notes, overrides, reports, latest_recommendation, sessions]
+      properties:
+        profile: { $ref: '#/components/schemas/DiscoveryProfile' }
+        evidence: { $ref: '#/components/schemas/EvidenceList' }
+        cases: { type: array, items: { $ref: '#/components/schemas/Case' } }
+        notes: { type: array, items: { $ref: '#/components/schemas/Note' } }
+        overrides: { type: array, items: { $ref: '#/components/schemas/Override' } }
+        reports: { type: array, items: { $ref: '#/components/schemas/ReportListItem' } }
+        latest_recommendation: { type: [object, 'null'] }
+        sessions: { type: array, items: { type: object, required: [id, instrument_id, status, attempt_no] } }
+    ConflictRequest: { type: object, required: [reason], properties: { reason: { type: string, minLength: 10, maxLength: 1000 } } }
+    ConflictResult:
+      type: object
+      required: [student_id, status, ended_at]
+      properties: { student_id: { type: string }, status: { const: unassigned }, ended_at: { $ref: '#/components/schemas/IsoDateTime' } }
+
+    # ---------------------------------------------------------------- reports
+    ReportStatus: { type: string, enum: [draft, review_requested, approved, rejected] }
+    ReportPayload:
+      type: object
+      required: [schema, student, sections, limitations, sources]
+      properties:
+        schema: { const: discovery-report/1 }
+        student: { type: object, required: [display_name, grade] }
+        sections:
+          type: object
+          required: [expressed_interests, subject_preferences, work_values, self_reported_confidence, demonstrated_capabilities, recommendations, evidence_completeness, counselor_interpretation]
+          properties:
+            demonstrated_capabilities: { type: object, required: [status] }
+            recommendations: { type: [object, 'null'] }
+            evidence_completeness: { type: object, required: [present, verified, total] }
+            counselor_interpretation: { type: array, items: { type: object, required: [override_id, score_run_id, text] } }
+        limitations: { type: array, items: { type: string } }
+        sources: { type: object, required: [score_run_ids, recommendation_run_id, rule_snapshot_ids] }
+    ReportRecord:
+      type: object
+      required: [id, student_id, status, payload, payload_hash, created_at]
+      properties:
+        id: { type: string }
+        seq: { type: integer }
+        tenant_id: { type: string }
+        student_id: { type: string }
+        status: { $ref: '#/components/schemas/ReportStatus' }
+        payload: { $ref: '#/components/schemas/ReportPayload' }
+        payload_hash: { $ref: '#/components/schemas/Hash' }
+        created_by: { type: string }
+        created_at: { $ref: '#/components/schemas/IsoDateTime' }
+        review_requested_at: { type: [string, 'null'] }
+        decided_at: { type: [string, 'null'] }
+        approval_id: { type: [string, 'null'] }
+    ReportCreated:
+      allOf:
+        - { $ref: '#/components/schemas/ReportRecord' }
+        - { type: object, required: [created], properties: { created: { type: boolean } } }
+    ReportListItem:
+      type: object
+      required: [id, status, created_at, payload_hash]
+      properties: { id: { type: string }, status: { $ref: '#/components/schemas/ReportStatus' }, created_at: { type: string }, payload_hash: { $ref: '#/components/schemas/Hash' }, review_requested_at: { type: [string, 'null'] }, decided_at: { type: [string, 'null'] } }
+    Approval:
+      type: object
+      required: [id, subject_type, subject_id, exact_payload_hash, approver_id, action, timestamp]
+      properties: { id: { type: string }, subject_type: { const: report }, subject_id: { type: string }, exact_payload_hash: { $ref: '#/components/schemas/Hash' }, approver_id: { type: string }, action: { type: string, enum: [approve, reject] }, reason: { type: string }, timestamp: { type: string } }
+    ReportView:
+      type: object
+      required: [id, student_id, status, watermark, payload, payload_hash, created_at, approval]
+      properties:
+        id: { type: string }
+        student_id: { type: string }
+        status: { $ref: '#/components/schemas/ReportStatus' }
+        watermark: { type: [string, 'null'], description: 'DRAFT until approved, then null' }
+        payload: { $ref: '#/components/schemas/ReportPayload' }
+        payload_hash: { $ref: '#/components/schemas/Hash' }
+        created_at: { type: string }
+        review_requested_at: { type: [string, 'null'] }
+        decided_at: { type: [string, 'null'] }
+        approval: { oneOf: [{ type: object, required: [id, action, timestamp, exact_payload_hash] }, { type: 'null' }] }
+        shares: { type: array, items: { $ref: '#/components/schemas/Share' } }
+        share: { $ref: '#/components/schemas/Share' }
+    DecideReportRequest:
+      type: object
+      required: [action, payload_hash]
+      properties: { action: { type: string, enum: [approve, reject] }, payload_hash: { $ref: '#/components/schemas/Hash' }, reason: { type: string, maxLength: 1000 } }
+    ReportDecision:
+      type: object
+      required: [report, approval]
+      properties: { report: { $ref: '#/components/schemas/ReportRecord' }, approval: { $ref: '#/components/schemas/Approval' } }
+    ShareRequest: { type: object, properties: { days: { type: integer, minimum: 1, maximum: 90 } } }
+    Share:
+      type: object
+      required: [id, report_id, student_id, recipient_role, purpose, created_by, created_at, expires_at, revoked_at]
+      properties: { id: { type: string }, report_id: { type: string }, student_id: { type: string }, tenant_id: { type: string }, recipient_role: { const: guardian }, purpose: { type: string }, created_by: { type: string }, created_at: { type: string }, expires_at: { type: string }, revoked_at: { type: [string, 'null'] }, revoked_reason: { type: [string, 'null'] } }
+
+    # ---------------------------------------------------------------- advisor
+    AdvisorSummaryRequest:
+      type: object
+      required: [student_id, purpose]
+      properties: { student_id: { type: string }, purpose: { type: string, enum: [career_guidance, university_guidance] } }
+    AdvisorSummary:
+      type: object
+      required: [approved_score_run_ids, recommendation_run_id, admission_source_snapshot_ids, warning_flags]
+      description: Ids and flags only. Never raw answers, evidence values or notes.
+      additionalProperties: false
+      properties:
+        approved_score_run_ids: { type: array, items: { type: string } }
+        recommendation_run_id: { type: [string, 'null'] }
+        admission_source_snapshot_ids: { type: array, items: { type: string } }
+        warning_flags: { type: array, items: { type: string } }
+    AdvisorExplainRequest:
+      type: object
+      required: [topic]
+      properties: { topic: { type: string, enum: [results, missing_evidence, program] }, purpose: { type: string, enum: [career_guidance, university_guidance] }, program_id: { type: string } }
+    AdvisorExplanation:
+      type: object
+      required: [authoritative, abstained, blocks, sources]
+      properties:
+        authoritative: { const: false }
+        abstained: { type: boolean }
+        reason: { type: string }
+        route_to: { type: string }
+        topic: { type: string }
+        blocks: { type: array, items: { type: object, required: [key, params] } }
+        sources: { type: object }
+
+    # ---------------------------------------------------------------- governance
+    InstrumentList:
+      type: object
+      required: [states, items]
+      properties:
+        states: { type: array, items: { type: string } }
+        items:
+          type: array
+          items:
+            type: object
+            required: [instrument_id, instrument_version_id, name, governance, runtime, usability, publication_blockers]
+            properties:
+              instrument_id: { type: string }
+              instrument_version_id: { type: string }
+              name: { $ref: '#/components/schemas/LocalizedText' }
+              governance: { type: object }
+              runtime: { type: object, required: [state, suspended] }
+              usability: { type: object, required: [usable] }
+              publication_blockers: { type: array, items: { type: string } }
+    PublishInstrumentRequest:
+      type: object
+      required: [target_state]
+      properties: { target_state: { type: string, enum: [approved_for_pilot, approved_for_production] }, reason: { type: string, maxLength: 500 } }
+    PublishInstrumentResult:
+      type: object
+      required: [status]
+      properties: { status: { type: string, enum: [awaiting_second_approver, published] }, pending: { type: object }, state: { type: string } }
+    SuspendRequest: { type: object, required: [reason], properties: { reason: { type: string, minLength: 5, maxLength: 500 } } }
+    SuspensionResult:
+      type: object
+      required: [changed, suspended]
+      properties: { changed: { type: boolean }, suspended: { type: boolean } }
+    RuleList:
+      type: object
+      required: [cycle, items]
+      properties:
+        cycle: { type: string }
+        items:
+          type: array
+          items:
+            type: object
+            required: [program_id, official_name, source_state, versions]
+            properties: { program_id: { type: string }, official_name: { $ref: '#/components/schemas/LocalizedText' }, university_id: { type: string }, source_state: { type: string }, active: { oneOf: [{ $ref: '#/components/schemas/Rule' }, { type: 'null' }] }, drafts: { type: array, items: { $ref: '#/components/schemas/Rule' } }, versions: { type: array, items: { type: object } } }
+    RuleDraftRequest:
+      type: object
+      required: [program_id, conditions, source, effective_from, effective_to, review_due_at]
+      properties:
+        program_id: { type: string }
+        cycle: { type: string, pattern: '^[0-9]{4}$' }
+        conditions: { type: array, minItems: 1, items: { type: object, required: [key, value], properties: { key: { type: string, enum: [pathway, secondary_percentage, gat, saat] }, value: { type: [number, string, array] } } } }
+        source: { type: object, required: [publisher, source_url, published_at, captured_at] }
+        effective_from: { type: string }
+        effective_to: { type: string }
+        review_due_at: { type: string }
+        competitive: { type: boolean }
+        application_window: { type: [object, 'null'] }
+    AssignmentList:
+      type: object
+      required: [students, counselors]
+      properties:
+        students:
+          type: array
+          items:
+            type: object
+            required: [student, status, counselor, assigned_at, conflict, excluded_counselors]
+            additionalProperties: false
+            properties:
+              student: { $ref: '#/components/schemas/StudentRef' }
+              status: { type: string, enum: [assigned, unassigned] }
+              counselor: { oneOf: [{ $ref: '#/components/schemas/PersonRef' }, { type: 'null' }] }
+              assigned_at: { type: [string, 'null'] }
+              conflict:
+                oneOf:
+                  - type: object
+                    required: [declared_by, declared_at]
+                    additionalProperties: false
+                    properties: { declared_by: { $ref: '#/components/schemas/PersonRef' }, declared_at: { type: string } }
+                  - { type: 'null' }
+              excluded_counselors: { type: array, items: { type: string } }
+        counselors:
+          type: array
+          items: { type: object, required: [id, display_name, students], additionalProperties: false, properties: { id: { type: string }, display_name: { $ref: '#/components/schemas/LocalizedText' }, students: { type: integer } } }
+    PersonRef:
+      type: object
+      required: [id, display_name]
+      properties: { id: { type: string }, display_name: { $ref: '#/components/schemas/LocalizedText' } }
+    ReassignRequest:
+      type: object
+      required: [student_id, counselor_id, reason]
+      properties: { student_id: { type: string }, counselor_id: { type: string }, reason: { type: string, minLength: 3, maxLength: 500 } }
+    ReassignResult:
+      type: object
+      required: [student_id, counselor_id, status, changed]
+      properties: { student_id: { type: string }, counselor_id: { type: string }, status: { const: assigned }, changed: { type: boolean } }
+    SuppressedCount:
+      type: object
+      required: [suppressed, value]
+      properties: { suppressed: { type: boolean }, value: { type: [integer, 'null'] } }
+    ControlTower:
+      type: object
+      required: [min_cell_size, cohort, modules, appeals, catalog_freshness, instruments, security, operations, incident_mode]
+      properties:
+        min_cell_size: { type: integer }
+        cohort: { type: object, required: [opted_in_students, sessions], properties: { opted_in_students: { $ref: '#/components/schemas/SuppressedCount' }, sessions: { $ref: '#/components/schemas/SuppressedCount' } } }
+        modules: { type: array, items: { type: object, required: [instrument_id, locale, started, submitted, median_completion_seconds] } }
+        appeals: { $ref: '#/components/schemas/SuppressedCount' }
+        catalog_freshness: { type: object, required: [programs, verified_current, stale, conflicting, none, not_published] }
+        instruments: { type: array, items: { type: object, required: [instrument_id, state, suspended] } }
+        security: { type: object, required: [access_denied_total, no_consent_denials] }
+        operations: { type: object, required: [outbox_pending, outbox_retrying, audit_events, audit_chain] }
+        incident_mode: { type: object, required: [enabled, reason] }
+    AuditEvent:
+      type: object
+      required: [id, seq, tenant_id, actor, subject_ref, action, before_hash, after_hash, policy_decision, meta, correlation_id, timestamp, prev_hash, hash]
+      properties:
+        id: { type: string }
+        seq: { type: integer }
+        tenant_id: { type: [string, 'null'] }
+        actor: { type: object, required: [id, role] }
+        subject_ref: { type: [string, 'null'] }
+        action: { type: string }
+        before_hash: { oneOf: [{ $ref: '#/components/schemas/Hash' }, { type: 'null' }] }
+        after_hash: { oneOf: [{ $ref: '#/components/schemas/Hash' }, { type: 'null' }] }
+        policy_decision: { type: string, enum: [allow, deny] }
+        meta: { type: object }
+        correlation_id: { type: [string, 'null'] }
+        timestamp: { $ref: '#/components/schemas/IsoDateTime' }
+        prev_hash: { $ref: '#/components/schemas/Hash' }
+        hash: { $ref: '#/components/schemas/Hash' }
+    AuditLog:
+      type: object
+      required: [total, chain, items]
+      properties:
+        total: { type: integer }
+        chain: { type: object, required: [ok, length] }
+        items: { type: array, items: { $ref: '#/components/schemas/AuditEvent' } }
+    KillSwitchRequest:
+      type: object
+      required: [enabled]
+      properties: { enabled: { type: boolean }, reason: { type: string, maxLength: 500 } }
+    KillSwitch:
+      type: object
+      required: [enabled, reason, by, at]
+      properties: { enabled: { type: boolean }, reason: { type: [string, 'null'] }, by: { type: [string, 'null'] }, at: { type: [string, 'null'] } }

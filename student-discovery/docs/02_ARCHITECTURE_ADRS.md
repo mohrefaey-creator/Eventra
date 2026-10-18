@@ -53,3 +53,23 @@ script and style; a unit test enforces no inline handlers/styles and no direct `
 hashes and codes are isolated with `<bdi>`/`dir="ltr"`; data bars keep a left-to-right 0→100 scale in both languages (the
 spec says not to reverse diagrams) while labels follow the reading direction. Internal spec references were removed from
 student-facing Arabic copy after the hyphen in "D-07" scrambled under bidi reordering.
+
+**ADR-014 · Assignments are history, not a flag.** A counselor assignment row is never deleted: ending one sets `ended_at` and
+`end_reason` (`conflict_of_interest` or `reassigned`). Only an open row gives access, in the policy check, the queue, and where new
+cases are routed. A counselor who declared a conflict for a student is excluded from ever being assigned to them again. Declaring needs
+no consent from the student because it only removes access. The conflict reason is kept in `db.conflicts` and appears in no list or audit
+entry. The idempotency epoch counts ended rows, so a replayed answer cannot outlive a change of assignment.
+
+**ADR-015 · PDF by an installed browser, after the transaction.** Spec §6.2 and the zero-runtime-dependency rule rule out a PDF library,
+so an installed Chromium/Chrome prints a server-built page (semantic HTML from the same dictionaries as the screen, everything escaped, CSP
+with no script or network, name resolution disabled, throw-away profile) into a tagged PDF with `Lang`, `Title`, headings, tables and lists.
+Authorization and the `report.exported` audit event happen inside the transaction; rendering happens after it commits through a route-level
+`finish` hook so a slow render never holds the database. Output is cached by content fingerprint and language, at most two renders run at
+once, four may wait, a hung browser is killed after 30 s. No browser: 501 and the print stylesheet remains. *Revisit:* a vetted PDF service
+and PDF/UA validation.
+
+**ADR-016 · The API contract is a checked artifact.** `docs/api/openapi.yaml` and `docs/api/events.schema.json` are hand-written and
+validated against the running server: route parity (including who needs CSRF), a scenario that drives every operation and validates every
+request the server accepted and every response (problems included), invariants over everything returned (no probability, percentile or
+norm anywhere; no birth dates or keys), and every outbox event against its payload schema (extra fields are rejected, which keeps events to ids
+and states). Mutating the server or the spec makes the suite fail (checked during the build).

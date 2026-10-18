@@ -1,0 +1,66 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://nextmind.example.invalid/schemas/discovery-events-1.json",
+  "title": "Student Discovery outbox events (schema_version 1)",
+  "description": "Every event carries ids and states only, never names, answers, scores, evidence values or free text. Delivery is at-least-once; consumers must be idempotent on `idempotency_key`. Each payload schema forbids extra properties, so adding a field to an event is a deliberate, reviewed change.",
+  "$ref": "#/$defs/Envelope",
+  "$defs": {
+    "Envelope": {
+      "type": "object",
+      "required": ["id", "event_type", "schema_version", "aggregate_id", "tenant_id", "actor", "correlation_id", "payload", "idempotency_key", "created_at", "published_at", "retry_count", "last_error"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "event_type": { "type": "string", "enum": [
+          "discovery.session.started", "discovery.session.submitted", "discovery.score.ready", "discovery.profile.updated",
+          "discovery.recommendation.generated", "discovery.report.review_requested", "discovery.report.approved",
+          "discovery.consent.granted", "discovery.consent.withdrawn", "discovery.instrument.suspended",
+          "discovery.assignment.conflict_declared", "discovery.assignment.changed",
+          "catalog.admission_rule.published", "catalog.admission_rule.expired"
+        ] },
+        "schema_version": { "const": 1 },
+        "aggregate_id": { "type": "string" },
+        "tenant_id": { "type": ["string", "null"] },
+        "actor": {
+          "oneOf": [
+            { "type": "object", "required": ["id", "role"], "additionalProperties": false, "properties": { "id": { "type": ["string", "null"] }, "role": { "type": "string" } } },
+            { "type": "null" }
+          ]
+        },
+        "correlation_id": { "type": ["string", "null"] },
+        "payload": { "type": "object" },
+        "idempotency_key": { "type": "string", "pattern": "^[0-9a-f]{32}:[0-9]+$" },
+        "created_at": { "type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T" },
+        "published_at": { "type": ["string", "null"] },
+        "retry_count": { "type": "integer", "minimum": 0 },
+        "last_error": { "type": ["string", "null"] }
+      }
+    },
+    "events": {
+      "discovery.session.started": { "type": "object", "required": ["student_id", "instrument_version_id"], "additionalProperties": false, "properties": { "student_id": { "type": "string" }, "instrument_version_id": { "type": "string" } } },
+      "discovery.session.submitted": { "type": "object", "required": ["student_id", "instrument_id"], "additionalProperties": false, "properties": { "student_id": { "type": "string" }, "instrument_id": { "type": "string" } } },
+      "discovery.score.ready": { "type": "object", "required": ["student_id", "instrument_id"], "additionalProperties": false, "properties": { "student_id": { "type": "string" }, "instrument_id": { "type": "string" } } },
+      "discovery.profile.updated": { "type": "object", "required": ["student_id"], "additionalProperties": false, "properties": { "student_id": { "type": "string" }, "evidence_type": { "type": "string" } } },
+      "discovery.recommendation.generated": { "type": "object", "required": ["student_id", "recommendation_run_id"], "additionalProperties": false, "properties": { "student_id": { "type": "string" }, "recommendation_run_id": { "type": "string" } } },
+      "discovery.report.review_requested": { "type": "object", "required": ["student_id", "report_id"], "additionalProperties": false, "properties": { "student_id": { "type": "string" }, "report_id": { "type": "string" } } },
+      "discovery.report.approved": { "type": "object", "required": ["student_id", "report_id"], "additionalProperties": false, "properties": { "student_id": { "type": "string" }, "report_id": { "type": "string" } } },
+      "discovery.consent.granted": { "$ref": "#/$defs/consentPayload" },
+      "discovery.consent.withdrawn": { "$ref": "#/$defs/consentPayload" },
+      "discovery.instrument.suspended": { "type": "object", "required": ["instrument_id"], "additionalProperties": false, "properties": { "instrument_id": { "type": "string" } } },
+      "discovery.assignment.conflict_declared": { "type": "object", "required": ["student_id"], "additionalProperties": false, "properties": { "student_id": { "type": "string" } } },
+      "discovery.assignment.changed": { "type": "object", "required": ["student_id"], "additionalProperties": false, "properties": { "student_id": { "type": "string" } } },
+      "catalog.admission_rule.published": { "type": "object", "required": ["program_id", "cycle", "version"], "additionalProperties": false, "properties": { "program_id": { "type": "string" }, "cycle": { "type": "string" }, "version": { "type": "integer" } } },
+      "catalog.admission_rule.expired": { "type": "object", "required": ["program_id", "cycle"], "additionalProperties": false, "properties": { "program_id": { "type": "string" }, "cycle": { "type": "string" } } }
+    },
+    "consentPayload": {
+      "type": "object",
+      "required": ["student_id", "scope", "party"],
+      "additionalProperties": false,
+      "properties": {
+        "student_id": { "type": "string" },
+        "scope": { "enum": ["assessment_processing", "counselor_sharing", "raw_answer_sharing", "guardian_summary_sharing", "advisor_explanation", "aggregate_analytics"] },
+        "party": { "enum": ["student", "guardian"] }
+      }
+    }
+  }
+}

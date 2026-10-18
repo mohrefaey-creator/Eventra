@@ -571,8 +571,9 @@ await step('four-eyes catalog: author cannot publish; second steward can; source
   await go(s2.page, '/admin/catalog');
   await s2.page.waitForSelector('[data-publish]');
   await s2.page.click('[data-publish]');
-  await s2.page.waitForFunction(() => document.querySelectorAll('[data-publish]').length === 0);
-  assert.equal(await s2.page.locator('tbody tr', { hasText: 'Nursing' }).locator('.chip', { hasText: 'Source current' }).count(), 1);
+  // The page shows a spinner while it reloads, so "no publish button" alone is true before the new table exists: wait for the result itself.
+  await s2.page.locator('tbody tr', { hasText: 'Nursing' }).locator('.chip', { hasText: 'Source current' }).waitFor();
+  assert.equal(await s2.page.locator('[data-publish]').count(), 0, 'the draft is published, so nothing is left to publish');
   await s2.context.close();
 });
 

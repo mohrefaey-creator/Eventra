@@ -141,3 +141,23 @@ test('the counselor who declared a conflict for A1 can never be chosen for A1, b
   assert.ok(list.students.every((x) => x.status === 'assigned'));
   assert.equal(list.counselors.find((c) => c.id === 'user-counselor-a2').students, 2);
 });
+
+test('an idempotent replay cannot outlive the end of an assignment', async () => {
+  const fresh = await startApp();
+  try {
+    const co = await fresh.as('user-counselor-a');
+    const url = `${BASE}/students/${A2}/notes`;
+    const headers = { 'idempotency-key': 'replay-after-conflict-1' };
+    const first = await co.post(url, { body: 'Follow up next week.' }, headers);
+    assert.equal(first.status, 201);
+    const replay = await co.post(url, { body: 'Follow up next week.' }, headers);
+    assert.equal(replay.headers.get('idempotent-replayed'), 'true', 'while nothing changed, the replay is served from the stored result');
+
+    assert.equal((await co.post(`${BASE}/students/${A2}/conflict-of-interest`, { reason: REASON })).status, 200);
+    const after = await co.post(url, { body: 'Follow up next week.' }, headers);
+    assert.equal(after.status, 403, 'the stored result must not be replayed to someone who no longer has access');
+    assert.equal(after.body.reason, 'not_available');
+  } finally {
+    await fresh.close();
+  }
+});

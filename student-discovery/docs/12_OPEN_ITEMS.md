@@ -17,15 +17,17 @@
 ## Additional items found while building
 1. Encryption at rest, backups, key management: not implemented (synthetic data only).
 2. Arabic copy and bidi review by a native education/localization expert; manual screen-reader and keyboard sessions with real users (including students).
-3. Arabic PDF export and its rendering test (AC-13); the print stylesheet is a stop-gap.
-4. Counselor conflict-of-interest and reassignment; guardian with several children; "expired" consent; `not eligible` landing state.
+3. PDF export exists (tagged; Arabic and English) but needs: a PDF/UA validator run (e.g. veraPDF), a native-speaker check of the Arabic pages, embedded-font decisions for machines without Arabic fonts, and retention/privacy controls before any real use (spec §1.3).
+4. "Expired" consent; `not eligible` landing state. (Counselor conflict of interest, reassignment and guardians with several children are built.)
 5. A task model with owners and due dates for the roadmap (DISC-08 "owner missing / overdue").
 6. Evidence-recording workflow for instruments (licence document, validation results) so a legitimately validated instrument can be unblocked, plus its four-eyes promotion test through the API.
 7. Rights-request, retention and deletion jobs; incident escalation; monitoring.
-8. OpenAPI/JSON Schema artifacts and contract tests; SBOM and dependency scanning (the runtime has no dependencies; dev tools do).
+8. SBOM and dependency scanning (the runtime has no dependencies; dev tools do, including `ajv` and `yaml` for the contract tests). OpenAPI/JSON Schema artifacts and contract tests are built (`docs/api/`).
 9. Pilot design (§15): sampling, pre-registration, subgroup/fairness plan, comprehension and appeal-rate metrics.
-10. Separate visibility class and consent scope for raw answers (spec §11.7); external anchoring of the audit chain; complementary suppression in aggregates; a copy-on-write or database-backed store; guardian-link management (creation, expiry, revocation) beyond the field the policy already honours.
+10. External anchoring of the audit chain; complementary suppression in aggregates; a copy-on-write or **database-backed store (PostgreSQL is the spec's target; needs a decision on which engine and migration tooling before it is built)**; guardian-link management (creation, expiry, revocation) beyond the field the policy already honours. (The separate consent scope for raw answers is built.)
 11. Attempt-to-attempt change policy (retake spacing, interpretation of change) beyond the placeholder maximum of five attempts.
+12. Conflict of interest and assignment policy (needs the signed authorization matrix, D-09): who may read a conflict reason and for how long; whether a platform role can override a school admin; how and how fast the school admin is alerted when a counselor steps away (the outbox event exists, nothing consumes it); what a student is told when their counselor changes; whether a conflict also bars reading the student's notes after handover.
+13. Guardian with several children: the selector and per-child consent are built; a guardian linked to children in different schools is not modelled (links are per student, the tenant check still applies per child).
 
 ## Suggested next steps, in order
 1. Obtain the NextMind repository and gate records and complete WP-00 (replace the four stand-ins).

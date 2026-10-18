@@ -13,7 +13,7 @@ audit and governance screens, in **Arabic (RTL, default) and English (LTR)**.
 
 ## Run it
 
-Requires Node.js 20 or newer. There are **no runtime dependencies** (nothing to install to run it).
+Requires Node.js 20 or newer. There are **no runtime dependencies** (nothing to install to run it). The dev tools (ESLint, axe-core, Playwright, and `ajv` + `yaml` for the contract tests) are only needed to run the checks: `npm install`.
 
 ```bash
 cd student-discovery
@@ -31,6 +31,7 @@ were created).
 | `ALLOW_NETWORK_HOST` | unset | Explicit, risky opt-in: anyone who can reach the port can act as any persona. |
 | `DATA_FILE` | `data/db.json` | Set to an empty string for an in-memory database. |
 | `SYNTHETIC_MODE` | `true` | Set `false` to see the **fail-closed** behavior: exploratory instruments refuse to start. |
+| `CHROMIUM_PATH` | auto-detected | Optional. PDF download of approved reports needs an installed Chromium or Chrome (looked up in `$PLAYWRIGHT_BROWSERS_PATH`, `/opt/pw-browsers`, then common system paths). Without one the app works fully and the report page says PDF download is unavailable (print-to-PDF still works). |
 
 ## A five-minute tour
 
@@ -41,7 +42,10 @@ were created).
 | Read results | **Demo Student A2** (pre-filled) | Six interest bars with numbers, "insufficient data" instead of zero, no percentile, no Holland code, "Verify the calculation" replays the score from the saved answers. |
 | Major suggestions | Student A2 → *Majors* | Interest fit, academic readiness and admission conditions are shown **separately**. Look for *Source outdated*, *Sources conflict*, *Not evaluated*. No admission probability appears anywhere. |
 | Ask the explainer | Student A2 → a program → *Explain this major* | Try *Psychology* (conflicting source): it **abstains** and routes to a human. |
-| Review as counselor | **Demo Counselor (School A)** | Case queue with reasons, consent-gated access, evidence verification with a note, signed interpretation notes, hash-bound report approval. Every view is logged. |
+| Review as counselor | **Demo Counselor (School A)** | Case queue with reasons, consent-gated access, evidence verification with a note, signed interpretation notes, hash-bound report approval. Every view is logged. Individual answers need the student's **separate** answer-sharing consent. |
+| Conflict of interest | Counselor (School A) → queue → **Step away**, then **Demo Tenant Admin (School A)** → *Counselor assignments* | Works even for a student who shared nothing; access ends at once. The admin sees who stepped away and when (never why) and picks another counselor; the one who stepped away is never offered again. History is kept. |
+| A guardian with two children | **Demo Guardian (two children)** | A child selector; each child has its own consent and sharing state. |
+| PDF | Counselor approves Student A2's report, then Student A2 → *Report* → **Download PDF** | A tagged PDF in the current language (Arabic RTL or English). Needs Chromium/Chrome (see `CHROMIUM_PATH`). |
 | Four-eyes publishing | **Catalog Steward 1** then **2** | The author of a rule draft cannot publish it. |
 | Governance | **Psychometric Lead 1**, **Security & Audit** | Instrument states, why publication is blocked, kill switch, hash-chained audit log, small-cell suppression in the control tower. |
 | Tenant isolation | **Demo Student B1** | School B cannot reach School A's data; the attempt is itself audited. |
@@ -58,9 +62,12 @@ Switch language any time with the button in the header. Settings has text size, 
 * **Matching** with three separate axes; centred-cosine interest similarity; strict (non-renormalized) subject and
   value alignment; the spec's weighted composite is **refused** because a required input (demonstrated skills) does not exist.
 * **Server-side authorization on every request**: tenant, role, relationship, consent scope and purpose
-  ([docs/08](docs/08_THREAT_MODEL_AND_PRIVACY.md)); append-only hash-chained audit; transactional outbox; kill switch;
+  ([docs/08](docs/08_DPIA_THREAT_MODEL_AND_SAFEGUARDING.md)); append-only hash-chained audit; transactional outbox; kill switch;
   idempotency keys; optimistic concurrency; RFC 7807 errors; CSRF; rate limiting; strict CSP.
-* **Quality gates**: unit, API, security and browser end-to-end tests, and a WCAG 2.2 AA automated scan
+* **Counselor lifecycle**: step away on a conflict of interest, school-admin reassignment, assignment history, a conflicted counselor can never return to that student.
+* **Separate consent for individual answers**, guardians with several children, and **PDF export** of approved reports (tagged, Arabic and English).
+* **A checked API contract**: [OpenAPI 3.1](docs/api/openapi.yaml) and [event JSON Schemas](docs/api/events.schema.json), validated against the running server.
+* **Quality gates**: unit, API, security, contract and browser end-to-end tests, and a WCAG 2.2 AA automated scan
   ([docs/09](docs/09_TEST_PLAN_EVIDENCE.md)).
 
 ## What is deliberately *not* implemented
@@ -72,7 +79,7 @@ Not forgotten, but excluded by the spec or blocked on decisions only people can 
 * **Real Saudi universities, programs, thresholds, admission cycles, or official integrations**: all fictional; a real catalog needs source-verified stewardship (§5.5, D-03).
 * **Norms, percentiles, IRT scaling, admission probabilities, "AI placement"**: excluded (§1.4, §5.1).
 * **External AI models**: the advisor is a deterministic explainer (template wording over structured results). No student data leaves the machine.
-* **Production concerns**: PostgreSQL, encryption at rest, real identity/consent services, retention jobs, rights-request workflows, PDF generation (the report prints cleanly to PDF from the browser), penetration testing, load and DR drills.
+* **Production concerns**: PostgreSQL, encryption at rest, real identity/consent services, retention jobs, rights-request workflows, a database-backed store (the spec targets PostgreSQL), PDF/UA validation of the PDF export, penetration testing, load and DR drills.
 * **Native-speaker review of the Arabic copy** and manual assistive-technology testing: needed before any pilot.
 
 The full list, with owners from the spec's risk register, is in [docs/12_OPEN_ITEMS.md](docs/12_OPEN_ITEMS.md).
@@ -80,9 +87,10 @@ The full list, with owners from the spec's risk register, is in [docs/12_OPEN_IT
 ## Commands
 
 ```bash
-npm test            # unit + API + security tests (node:test)           ~2 s
+npm test            # unit + API + security + contract tests (node:test)  ~7 s
+npm run test:contract   # OpenAPI + event schemas against the running server
 npm run lint        # unused imports / undefined names (ESLint)
-npm run test:e2e    # drives the real app in Chromium, both locales, plus an axe-core accessibility scan (~40 s)
+npm run test:e2e    # drives the real app in Chromium, both locales, plus an axe-core accessibility scan (~45 s)
 npm run check       # lint + tests
 python3 web/i18n/build_dictionaries.py   # regenerate the two UI dictionaries from the single source
 ```
@@ -96,8 +104,8 @@ python3 web/i18n/build_dictionaries.py   # regenerate the two UI dictionaries fr
 domain/        pure, deterministic logic: instruments, scoring, matching, admission gate, fictional catalog
 server/        zero-dependency HTTP server: policy (authorization), services, audit/outbox, seed data
 web/           the app: vanilla ES modules, no build step, CSP-safe, i18n/ar-SA.json + en.json
-test/          unit/, api/ (incl. security), e2e/ (Chromium + axe)
-docs/          the spec's §17 artifact set, condensed and honest about gaps
+test/          unit/, api/ (incl. security), contract/ (OpenAPI + events), e2e/ (Chromium + axe)
+docs/          the spec's §17 artifact set, condensed and honest about gaps; docs/api/ holds the OpenAPI and event schemas
 ```
 
 The layout deliberately mirrors the spec's candidate structure (§13) so the pieces can move into the real NextMind

@@ -33,5 +33,5 @@ export function createApp(opts = {}) {
       res.end();
     });
   });
-  return { server, store, config, clock };
+  return { server, store, config, clock, router };
 }

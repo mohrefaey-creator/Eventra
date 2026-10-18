@@ -6,7 +6,7 @@ Every mutating request needs the `X-CSRF-Token` header (from `GET /identity-stub
 `Idempotency-Key` is honored on all mutating routes (same key + same body replays a stored snapshot for up to 10 minutes **and only while no consent or relationship record has changed**; same key + different body → 422).
 `PUT …/responses/:itemId` supports `If-Match: "<revision>"` (stale → 412 with `current_revision`).
 **Denials:** identity-related refusals (unknown id, other school, someone else's student, unlinked guardian, unassigned counselor) all answer `403` with `reason: "not_available"`, so a caller cannot probe for existence; the audit log records the true reason. The server only answers loopback `Host` headers unless started with `ALLOW_NETWORK_HOST=true`.
-Machine-readable OpenAPI is **not** produced (deviation 6 in `00`); this table is checked against the real route table by a unit test.
+The machine-readable contract is [`api/openapi.yaml`](api/openapi.yaml) (OpenAPI 3.1) with event payloads in [`api/events.schema.json`](api/events.schema.json); `npm run test:contract` validates both against the running server (routes, security, every response shape, every event). This table is the human summary and is also checked against the real route table.
 
 **Authorization column** = the policy intent evaluated by `server/policy.js#authorize` (role → allowed consent scope), or the role list for governance routes.
 "consent" means the named scope must be active; counselors additionally need `assessment_processing` **and** an assignment to the student.

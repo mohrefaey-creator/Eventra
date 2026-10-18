@@ -5,21 +5,22 @@ All numbers below are from runs in this workspace (Node 22, Chromium from `/opt/
 | Suite | Command | Result | Notes |
 |---|---|---|---|
 | Unit (domain + UI helpers) | `npm test` | 43 tests | scoring, ties, property tests (300 random answer sets, monotonicity, order independence), gate, matching, recommendation runs, validation, i18n parity, CSP-safety lint, route-doc drift |
-| API + security (incl. 20 review regressions) | `npm test` | 81 tests | acceptance criteria, authorization, tenancy, consent, concurrency, governance, audit, kill switch, rate limit, outbox retry |
+| API + security (incl. 20 review regressions) | `npm test` | 106 tests | acceptance criteria, authorization, tenancy, consent, concurrency, governance, audit, kill switch, rate limit, outbox retry; raw-answer scope, multi-child guardians, conflict of interest and reassignment, PDF export (real Chromium, a missing browser, a failing browser) |
+| Contract (OpenAPI + events) | `npm run test:contract` (also in `npm test`) | 8 tests | route parity and security per route, a scenario that exercises all 61 operations (54 paths) through the real API and validates its 105 requests and responses, safety invariants over every body, every outbox event against its schema |
 | Lint | `npm run lint` | clean | unused imports/vars, undefined names |
-| Browser E2E | `npm run test:e2e` | 23/23 steps, run repeatedly | real app in Chromium with the CSP enforced, Arabic and English, mobile width, offline/reconnect, keyboard, four-eyes, kill switch |
+| Browser E2E | `npm run test:e2e` | 26/26 steps | real app in Chromium with the CSP enforced, Arabic and English, mobile width, offline/reconnect, keyboard, four-eyes, kill switch |
 | Accessibility scan | inside the E2E run | **0 axe-core violations** (WCAG 2.0/2.1/2.2 A+AA tags) | every screen, ar-SA and en, light and dark, six personas |
 
-`npm test` finishes in about 2 seconds; the E2E run in about 40 seconds.
+`npm test` finishes in about 7 seconds (the PDF tests start a real Chromium); the E2E run in about 45 seconds.
 
 ## Coverage against spec §12.2
 | Required suite | Status |
 |---|---|
 | Unit: item validation, RIASEC scoring, reverse-coding, missingness, normalization, similarity, threshold gate, locale formatting | ✅ (locale formatting is exercised via the E2E rather than a dedicated unit test) |
 | Property-based: range invariants, order independence, monotonicity, idempotency, null-as-zero | ✅ scoring; 🟡 matching has example-based tests only |
-| Contract: OpenAPI and events, authorization, snapshots | 🟡 No OpenAPI file; route table is checked against the docs; event names asserted in API tests |
+| Contract: OpenAPI and events, authorization, snapshots | ✅ OpenAPI 3.1 and event JSON Schemas validated against the live server (see above). 🟡 No consumer-driven contracts (no consumers exist); no snapshot tests |
 | Integration: migrations, outbox, concurrency, queue outage/replay | 🟡 No database/migrations; outbox, concurrency and retry are tested |
-| E2E: ar-SA/en, mobile, back/forward, offline, guardian denial, counselor approval, PDF export | 🟡 all except browser back/forward and PDF export |
+| E2E: ar-SA/en, mobile, back/forward, offline, guardian denial, counselor approval, PDF export | 🟡 all except browser back/forward (PDF download is a real browser download of a `%PDF-` file) |
 | Accessibility: WCAG automated + manual screen reader/keyboard + Arabic native QA | 🟡 automated scan and keyboard tests ✅; **manual screen-reader and native Arabic QA not done** |
 | Security: OWASP threats, prompt injection, IDOR, leaked keys, exfiltration, revocation, SAST/DAST, SBOM, penetration | 🟡 IDOR, tenancy, CSRF, XSS-by-construction, revocation, prototype-pollution review (see below). No SAST/DAST, SBOM, or penetration test. Prompt injection is not applicable (no model is called) |
 | Psychometric: licensed scoring fidelity, translation, reliability, validity, subgroup functioning | ⛔ not possible: no licensed or validated instrument exists |
@@ -28,6 +29,9 @@ All numbers below are from runs in this workspace (Node 22, Chromium from `/opt/
 ## Checks that the tests themselves can fail
 Two deliberate mutations were applied to the domain code during development and the suite caught both (removing the minimum-completion rule failed 4 tests;
 treating unverified evidence as verified failed the gate test), then the code was restored.
+Four more were applied when the contract suite was built, each caught and then reverted: a spec change (the hash pattern) failed the response check; a server
+that returned a `percentile` field failed the invariant check; a non-null `norm_reference` failed both the schema and the invariant check; an extra field in an
+event payload failed the event check. (A first attempt at one of them did not apply and the suite correctly stayed green, which is why the run was repeated with a change that did.)
 
 ## Defects found and fixed during the build (so the history is honest)
 | Found by | Defect | Fix |
@@ -41,6 +45,11 @@ treating unverified evidence as verified failed the gate test), then the code wa
 | axe | Disabled cards fell below 4.5:1 contrast (`opacity`) | Removed opacity |
 | E2E | Report page overflowed horizontally (rotated DRAFT watermark); control tower and program pages overflowed at 375 px (long chips; hidden table captions escaping the scroll container) | CSS containment fixes |
 | Unit test | A hard-coded, unused `{b}` placeholder parameter | Removed |
+| Design review while building, then a regression test | Ending an assignment edits a row instead of adding one, but the idempotency epoch only counted rows, so a replayed request could have outlived a change of assignment | Epoch counts ended rows twice; `an idempotent replay cannot outlive the end of an assignment` fails with the old epoch (checked) |
+| E2E (flaky, seen once in nine runs) | The four-eyes step failed once and the message was not captured. By reading the code, the likely cause is that it waited for "no publish button" (also true while the page shows its loading spinner) and then counted the Nursing chip without waiting. Not reproduced afterwards | The step now waits for the chip itself; ten consecutive runs passed |
+| E2E (written wrong) | The step-away step clicked the first queue row, which is sorted by number of reasons and was not the intended student; it stepped away from the wrong one and later steps passed silently on an error page | The step selects the row by student id and asserts the roster afterwards |
+| API test (PDF) | A `no probability` check matched the report's own sentence "shows no chance of acceptance" | The check now asserts that sentence is present and that no percentage sign appears |
+| Contract suite | First run: two **spec** errors (the aptitude module's `hold_reason` is a localized object; the profile shows notes without `student_id`), plus a test helper that missed an `emit` with a conditional event name | Spec and helper corrected; the server was right in all three cases |
 
 ## Independent adversarial review
 
